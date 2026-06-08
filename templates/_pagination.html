@@ -1,0 +1,48 @@
+{#
+分页组件 - 在所有列表页面中复用
+
+必需变量:
+  current_page: 当前页码
+  total_pages: 总页数
+  page_url_prefix: 分页链接前缀（如 "?q=xxx&page=" 或 "/3d/stats?page="）
+
+可选变量:
+  page_url_suffix: 分页链接后缀（如果有额外参数）
+#}
+{% if total_pages and total_pages > 1 %}
+<div class="pagination">
+    {# 首页 #}
+    {% if current_page > 1 %}
+    <a href="{{ page_url_prefix }}1{{ page_url_suffix or '' }}" class="page-link page-nav" title="首页">⟪</a>
+    <a href="{{ page_url_prefix }}{{ current_page-1 }}{{ page_url_suffix or '' }}" class="page-link page-nav" title="上一页">‹</a>
+    {% endif %}
+
+    {# 页码 #}
+    {% set start = [current_page-2, 1] | max %}
+    {% set end = [start+4, total_pages] | min %}
+    {% set start = [end-4, 1] | max %}
+
+    {% if start > 1 %}
+    <a href="{{ page_url_prefix }}1{{ page_url_suffix or '' }}" class="page-link page-num">1</a>
+    {% if start > 2 %}<span class="page-ellipsis">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in range(start, end+1) %}
+    <a href="{{ page_url_prefix }}{{ p }}{{ page_url_suffix or '' }}"
+       class="page-link page-num {% if p == current_page %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+
+    {% if end < total_pages %}
+    {% if end < total_pages-1 %}<span class="page-ellipsis">…</span>{% endif %}
+    <a href="{{ page_url_prefix }}{{ total_pages }}{{ page_url_suffix or '' }}" class="page-link page-num">{{ total_pages }}</a>
+    {% endif %}
+
+    {# 下一页 / 末页 #}
+    {% if current_page < total_pages %}
+    <a href="{{ page_url_prefix }}{{ current_page+1 }}{{ page_url_suffix or '' }}" class="page-link page-nav" title="下一页">›</a>
+    <a href="{{ page_url_prefix }}{{ total_pages }}{{ page_url_suffix or '' }}" class="page-link page-nav" title="末页">»</a>
+    {% endif %}
+
+    <span class="page-info">{{ current_page }}/{{ total_pages }}</span>
+</div>
+{% endif %}

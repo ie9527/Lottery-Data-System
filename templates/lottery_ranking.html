@@ -1,0 +1,446 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="sep">›</span> <a href="/{{ lottery_code }}">{{ lottery_name }}</a>
+<span class="sep">›</span> <span class="current">排行分析</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ lottery_name }} <span class="subtitle">号码排行分析</span></h1>
+</div>
+
+<!-- 三级分类：排行类型切换 -->
+{% if available_rankings %}
+<div class="ranking-nav">
+    {% for rtype, rname, rdesc in available_rankings %}
+    <a href="/{{ lottery_code }}/ranking/{{ rtype }}" class="ranking-nav-item {% if ranking_type == rtype %}active{% endif %}" data-type="{{ rtype }}">
+        <span class="rn-name">{{ rname }}</span>
+        {% if ranking_type == rtype %}
+        <span class="rn-desc">{{ rdesc }}</span>
+        {% endif %}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- 时间范围筛选 -->
+<div class="ranking-controls">
+    <div class="rc-row">
+        <div class="mode-group">
+            <span class="rc-label">时间范围</span>
+            {% set ranges = [
+                ('all','全部'),('1y','近一年'),('6m','近半年'),('1m','近一月')
+            ] %}
+            {% for key, label in ranges %}
+            <button class="filter-quick {% if date_range == key %}active{% endif %}" onclick="setDateRange('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+        <div class="rc-right">
+            <form class="filter-date" id="dateFilterForm" onsubmit="return applyCustomDate()">
+                <input type="date" id="dateFrom" value="{{ date_from or '' }}" max="{{ today }}">
+                <span style="color:var(--text-muted)">~</span>
+                <input type="date" id="dateTo" value="{{ date_to or '' }}" max="{{ today }}">
+                <button type="submit" class="filter-date-btn">筛选</button>
+                {% if date_range == 'custom' %}
+                <a href="javascript:setDateRange('all')" class="filter-clear">清除</a>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 自定义出现次数查询 -->
+<div class="ranking-controls query-section" id="querySection">
+    <div class="rc-row">
+        <span class="rc-label">自定义查询</span>
+        <div class="query-form">
+            <input type="text" class="query-input" id="queryValue" placeholder="输入查询值，支持逗号、空格、顿号等分隔，如 01 22 33" maxlength="50">
+            <select class="input input-sm" id="queryCategory">
+                {% if available_rankings %}
+                {% for rtype, rname, rdesc in available_rankings %}
+                <option value="{{ rtype }}" {% if ranking_type == rtype %}selected{% endif %}>{{ rname }}</option>
+                {% endfor %}
+                {% endif %}
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="doQuery()">查询</button>
+            <div class="query-hint">多值查询示例：01,22,33（各号码分别统计）</div>
+        </div>
+    </div>
+    <!-- 查询结果 -->
+    <div class="query-result" id="queryResult" style="display:none"></div>
+</div>
+
+<!-- 排行配置栏 -->
+<div class="ranking-controls" id="rankingControls" style="{% if not available_rankings %}display:none{% endif %}">
+    {% if ranking_type == 'double' %}
+    <div class="rc-row">
+        <div class="mode-group">
+            <span class="rc-label">匹配模式</span>
+            <label class="mode-radio {% if mode == 'any' %}active{% endif %}" onclick="switchMode('any')">
+                <input type="radio" name="mode" value="any" {% if mode == 'any' %}checked{% endif %}>不限位置
+            </label>
+            <label class="mode-radio {% if mode == 'position' %}active{% endif %}" onclick="switchMode('position')">
+                <input type="radio" name="mode" value="position" {% if mode == 'position' %}checked{% endif %}>限制位置
+            </label>
+        </div>
+        <div class="rc-right">
+            <span class="rc-label" id="posLabel" style="{% if mode != 'position' %}display:none{% endif %}">位置:</span>
+            <select class="input input-sm" id="posSelect" onchange="changePosition(this)" style="{% if mode != 'position' %}display:none{% endif %}">
+                <option value="0,1" {% if position == '0,1' %}selected{% endif %}>百位+十位</option>
+                <option value="1,2" {% if position == '1,2' %}selected{% endif %}>十位+个位</option>
+                <option value="0,2" {% if position == '0,2' %}selected{% endif %}>百位+个位</option>
+            </select>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 排行榜 -->
+<div class="ranking-content" id="rankingContent">
+    <div class="ranking-loading">加载中…</div>
+</div>
+
+<!-- 分页 -->
+<div class="pagination" id="rankingPagination" style="display:none"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var CURRENT_CODE = '{{ lottery_code }}';
+var RANKING_TYPE = '{{ ranking_type }}';
+var CURRENT_MODE = '{{ mode }}';
+var CURRENT_POSITION = '{{ position }}';
+var CURRENT_PAGE = 1;
+var DATE_FROM = '{{ date_from or "" }}';
+var DATE_TO = '{{ date_to or "" }}';
+var DATE_RANGE = '{{ date_range or "all" }}';
+
+var TYPE_LABELS = {
+    'double': '组合', 'triple': '组合', 'tail': '尾号',
+    'blue': '号码', 'red': '号码', 'number': '号码',
+};
+
+function getDateParams() {
+    return '&date_from=' + encodeURIComponent(DATE_FROM) + '&date_to=' + encodeURIComponent(DATE_TO);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (RANKING_TYPE) loadRanking();
+});
+
+function loadRanking() {
+    var content = document.getElementById('rankingContent');
+    content.innerHTML = '<div class="ranking-loading">加载中…</div>';
+    document.getElementById('rankingPagination').style.display = 'none';
+
+    var url = '/api/' + CURRENT_CODE + '/ranking/' + RANKING_TYPE +
+        '?mode=' + CURRENT_MODE +
+        '&position=' + CURRENT_POSITION +
+        '&page=' + CURRENT_PAGE +
+        '&page_size=50' + getDateParams();
+
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(resp) {
+            if (resp.status !== 'success' || !resp.data) {
+                content.innerHTML = '<div class="empty-state"><p>暂无数据</p></div>';
+                return;
+            }
+            var data = resp.data;
+            var items = data.items || [];
+            var totalDraws = data.total_draws || 0;
+            var label = TYPE_LABELS[RANKING_TYPE] || '组合';
+
+            if (items.length === 0) {
+                content.innerHTML = '<div class="empty-state"><p>暂无排行数据</p></div>';
+                return;
+            }
+
+            var needBalls = RANKING_TYPE === 'blue' || RANKING_TYPE === 'red' || RANKING_TYPE === 'number';
+
+            var html = '<div class="ranking-table-wrap"><table class="data-table ranking-table"><thead><tr>' +
+                '<th class="rth-rank">排名</th>' +
+                '<th class="rth-combo">' + label + '</th>' +
+                '<th class="rth-count">出现次数</th>' +
+                '<th class="rth-prob">出现概率</th>' +
+                '</tr></thead><tbody>';
+
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i];
+                var comboHtml = '';
+
+                if (needBalls) {
+                    var ballColor = RANKING_TYPE === 'blue' ? 'ball-blue-sm' : 'ball-red-sm';
+                    comboHtml = '<span class="ball-row"><span class="ball-sm ' + ballColor + '">' + item.number + '</span></span>';
+                } else if (item.digits) {
+                    comboHtml = '<span class="ball-row">';
+                    for (var j = 0; j < item.digits.length; j++) {
+                        comboHtml += '<span class="ball-sm ball-gray">' + item.digits[j] + '</span>';
+                    }
+                    comboHtml += '</span>';
+                    if (item.group_type) {
+                        comboHtml += '<span class="group-type-tag tag-' + item.group_type + '">' + item.group_type + '</span>';
+                    }
+                } else {
+                    comboHtml = '<span class="combo-text">' + item.combination + '</span>';
+                }
+
+                var probText = item.probability.toFixed(2) + '%';
+
+                html += '<tr>' +
+                    '<td class="rank-cell"><span class="rank-num rank-top' + (i < 3 ? (i + 1) : '') + '">' + item.rank + '</span></td>' +
+                    '<td class="combo-cell">' + comboHtml + '</td>' +
+                    '<td class="count-cell"><strong>' + item.count + '</strong></td>' +
+                    '<td class="prob-cell">' +
+                        '<div class="prob-bar-wrap"><div class="prob-bar" style="width:' + Math.min(100, item.probability * 3) + '%"></div></div>' +
+                        '<span class="prob-text">' + probText + '</span>' +
+                    '</td></tr>';
+            }
+
+            html += '</tbody></table></div>';
+            html += '<div class="ranking-summary">共 <strong>' + data.total + '</strong> 种组合，基于 <strong>' + totalDraws + '</strong> 期开奖数据统计</div>';
+            content.innerHTML = html;
+            renderPagination(data);
+        })
+        .catch(function() {
+            content.innerHTML = '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
+        });
+}
+
+function renderPagination(data) {
+    var container = document.getElementById('rankingPagination');
+    if (!data.total_pages || data.total_pages <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = '';
+    var cp = data.current_page || 1;
+    var tp = data.total_pages;
+    var html = '';
+
+    if (cp > 1) {
+        html += '<a href="javascript:goPage(1)" class="page-link page-nav" title="首页">⟪</a>';
+        html += '<a href="javascript:goPage(' + (cp - 1) + ')" class="page-link page-nav" title="上一页">‹</a>';
+    }
+    var start = Math.max(1, cp - 2);
+    var end = Math.min(tp, start + 4);
+    start = Math.max(1, end - 4);
+    if (start > 1) {
+        html += '<a href="javascript:goPage(1)" class="page-link page-num">1</a>';
+        if (start > 2) html += '<span class="page-ellipsis">…</span>';
+    }
+    for (var p = start; p <= end; p++) {
+        html += '<a href="javascript:goPage(' + p + ')" class="page-link page-num ' + (p === cp ? 'active' : '') + '">' + p + '</a>';
+    }
+    if (end < tp) {
+        if (end < tp - 1) html += '<span class="page-ellipsis">…</span>';
+        html += '<a href="javascript:goPage(' + tp + ')" class="page-link page-num">' + tp + '</a>';
+    }
+    if (cp < tp) {
+        html += '<a href="javascript:goPage(' + (cp + 1) + ')" class="page-link page-nav" title="下一页">›</a>';
+        html += '<a href="javascript:goPage(' + tp + ')" class="page-link page-nav" title="末页">»</a>';
+    }
+    html += '<span class="page-info">' + cp + '/' + tp + '</span>';
+    container.innerHTML = html;
+}
+
+function goPage(p) {
+    CURRENT_PAGE = p;
+    loadRanking();
+}
+
+function switchMode(mode) {
+    CURRENT_MODE = mode;
+    CURRENT_PAGE = 1;
+    var radios = document.querySelectorAll('.mode-radio');
+    for (var i = 0; i < radios.length; i++) {
+        var input = radios[i].querySelector('input');
+        if (input && input.value === mode) {
+            radios[i].classList.add('active');
+        } else {
+            radios[i].classList.remove('active');
+        }
+    }
+    var posLabel = document.getElementById('posLabel');
+    var posSelect = document.getElementById('posSelect');
+    if (mode === 'position') {
+        posLabel.style.display = '';
+        posSelect.style.display = '';
+    } else {
+        posLabel.style.display = 'none';
+        posSelect.style.display = 'none';
+    }
+    loadRanking();
+}
+
+function changePosition(sel) {
+    CURRENT_POSITION = sel.value;
+    CURRENT_PAGE = 1;
+    loadRanking();
+}
+
+// ========== 日期筛选 ==========
+function setDateRange(range) {
+    DATE_RANGE = range;
+    DATE_FROM = '';
+    DATE_TO = '';
+    var now = new Date();
+    var fmt = function(d) {
+        var y = d.getFullYear();
+        var m = ('0' + (d.getMonth() + 1)).slice(-2);
+        var day = ('0' + d.getDate()).slice(-2);
+        return y + '-' + m + '-' + day;
+    };
+
+    if (range === '1y') {
+        var d = new Date(now);
+        d.setFullYear(d.getFullYear() - 1);
+        DATE_FROM = fmt(d);
+        DATE_TO = fmt(now);
+    } else if (range === '6m') {
+        var d = new Date(now);
+        d.setMonth(d.getMonth() - 6);
+        DATE_FROM = fmt(d);
+        DATE_TO = fmt(now);
+    } else if (range === '1m') {
+        var d = new Date(now);
+        d.setMonth(d.getMonth() - 1);
+        DATE_FROM = fmt(d);
+        DATE_TO = fmt(now);
+    }
+
+    // 更新按钮样式
+    var btns = document.querySelectorAll('.filter-quick');
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.remove('active');
+        if (btns[i].getAttribute('onclick').indexOf("'" + range + "'") !== -1) {
+            btns[i].classList.add('active');
+        }
+    }
+    // 如果自定义日期有值，保留输入框
+    if (range !== 'custom') {
+        document.getElementById('dateFrom').value = DATE_FROM;
+        document.getElementById('dateTo').value = DATE_TO;
+    }
+    CURRENT_PAGE = 1;
+    if (RANKING_TYPE) loadRanking();
+}
+
+function applyCustomDate() {
+    DATE_FROM = document.getElementById('dateFrom').value;
+    DATE_TO = document.getElementById('dateTo').value;
+    DATE_RANGE = 'custom';
+    CURRENT_PAGE = 1;
+    // 取消预设按钮高亮
+    var btns = document.querySelectorAll('.filter-quick');
+    for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.remove('active');
+    }
+    if (RANKING_TYPE) loadRanking();
+    return false;
+}
+
+// ========== 自定义查询 ==========
+function doQuery() {
+    try {
+        var qv = document.getElementById('queryValue').value.trim();
+        if (!qv) {
+            showQueryResult(false, '请输入查询值');
+            return;
+        }
+
+        var catEl = document.getElementById('queryCategory');
+        var cat = catEl ? catEl.value : RANKING_TYPE;
+
+        var url = '/api/' + CURRENT_CODE + '/ranking/query' +
+            '?ranking_type=' + encodeURIComponent(cat) +
+            '&query_value=' + encodeURIComponent(qv) +
+            getDateParams();
+
+        document.getElementById('queryResult').style.display = 'block';
+        document.getElementById('queryResult').className = 'query-result qr-loading';
+        document.getElementById('queryResult').innerHTML = '查询中…';
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(resp) {
+                if (resp.status !== 'success' || !resp.data) {
+                    showQueryResult(false, '查询失败');
+                    return;
+                }
+                var data = resp.data;
+                var totalDraws = data.total_draws || 0;
+
+                if (data.multi && data.items && data.items.length > 0) {
+                    // 多值结果
+                    var html = '<table class="data-table query-multi-table"><thead><tr>' +
+                        '<th>号码</th><th>出现次数</th><th>概率</th></tr></thead><tbody>';
+                    for (var i = 0; i < data.items.length; i++) {
+                        var item = data.items[i];
+                        var numStr = item.number !== undefined ? item.number :
+                            (item.combination || item.key || '');
+                        var probStr = item.probability ? item.probability.toFixed(2) + '%' : '0%';
+                        html += '<tr><td><strong>' + numStr + '</strong></td>' +
+                            '<td>' + item.count + ' 次</td>' +
+                            '<td>' + probStr + '</td></tr>';
+                    }
+                    html += '</tbody></table>';
+                    html += '<div class="ranking-summary">基于 ' + totalDraws + ' 期数据</div>';
+                    showQueryResult(true, html);
+                } else if (data.found && data.item) {
+                    var item = data.item;
+                    var infoHtml = '';
+                    if (item.number !== undefined) {
+                        infoHtml = '号码 <strong>' + item.number + '</strong>';
+                    } else if (item.combination) {
+                        infoHtml = '组合 <strong>' + item.combination + '</strong>';
+                        if (item.group_type) {
+                            infoHtml += ' <span class="group-type-tag tag-' + item.group_type + '">' + item.group_type + '</span>';
+                        }
+                    }
+                    showQueryResult(true,
+                        infoHtml + ' 出现 <strong>' + item.count + '</strong> 次' +
+                        '，概率 <strong>' + (item.probability ? item.probability.toFixed(2) : '0') + '%</strong>' +
+                        '（基于 ' + totalDraws + ' 期数据）'
+                    );
+                } else {
+                    showQueryResult(false, '未找到匹配记录');
+                }
+            })
+            .catch(function(err) {
+                showQueryResult(false, '查询失败，请重试');
+                console.error('doQuery.fetch error:', err);
+            });
+    } catch (e) {
+        showQueryResult(false, '查询出错：' + e.message);
+        console.error('doQuery error:', e);
+    }
+}
+
+function showQueryResult(success, msg) {
+    var el = document.getElementById('queryResult');
+    el.style.display = 'block';
+    if (success) {
+        el.className = 'query-result qr-success';
+    } else {
+        el.className = 'query-result qr-empty';
+    }
+    el.innerHTML = msg;
+}
+
+// 双号组合查询时显示位置选择
+document.addEventListener('DOMContentLoaded', function() {
+    var qMode = document.getElementById('queryMode');
+    if (qMode) {
+        qMode.addEventListener('change', function() {
+            var pos = document.getElementById('queryPos');
+            if (pos) {
+                pos.style.display = this.value === 'position' ? 'inline-block' : 'none';
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

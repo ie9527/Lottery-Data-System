@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="sep">›</span> <a href="/{{ lottery_code }}">{{ lottery_name }}</a>
+<span class="sep">›</span> <span class="current">历史开出统计</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ lottery_name }} <span class="subtitle">历史开出次数统计</span></h1>
+</div>
+
+{% if stats_data and stats_data.grouped_stats %}
+<!-- ========== 分组统计模式（SSQ/DLT/QXC/KL8/7LC） ========== -->
+<div class="grouped-stats-wrap">
+    <div class="ranking-summary">基于 <strong>{{ stats_data.total_draws }}</strong> 期开奖数据统计</div>
+
+    {% for group in stats_data.groups %}
+    <div class="grouped-stats-section">
+        <h3 class="grouped-stats-title">{{ group.label }}</h3>
+        <div class="grouped-stats-list">
+            {% for stat in group.stats %}
+            <div class="grouped-stats-row {% if stat.is_unappeared %}gs-row-unappeared{% endif %}">
+                <span class="gs-count-badge">{% if stat.is_unappeared %}未出现{% else %}出现 {{ stat.count }} 次{% endif %}</span>
+                <span class="gs-numbers">
+                    {% for num in stat.numbers %}
+                    <a href="/{{ lottery_code }}/search?q={{ '%02d'|format(num) }}&search_type=direct"
+                       class="gs-ball gs-ball-{% if stat.is_unappeared %}muted{% elif loop.index0 < 5 %}hot{% else %}normal{% endif %}">
+                        {{ '%02d'|format(num) }}
+                    </a>
+                    {% endfor %}
+                </span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% elif stats_data and stats_data.direct_total is defined %}
+<div class="stat-grid">
+    <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-value">{{ stats_data.direct_total }}</div>
+        <div class="stat-label">直选总次数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">📈</div>
+        <div class="stat-value">{{ stats_data.group_total }}</div>
+        <div class="stat-label">组选总次数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">🔢</div>
+        <div class="stat-value">{{ stats_data.total_numbers }}</div>
+        <div class="stat-label">号码总数</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- 搜索过滤 -->
+<div class="stats-search-wrap">
+    <input type="text" class="stats-search-input" id="statsFilter" placeholder="输入号码过滤…" oninput="filterStats(this.value)">
+    <span class="stats-search-count" id="statsCount">共 <strong>{{ stats_data.stats|length if stats_data and stats_data.stats else 0 }}</strong> 个号码</span>
+</div>
+
+<!-- 统计网格 -->
+<div class="stats-grid" id="statsGrid">
+    {% if stats_data and stats_data.stats %}
+    {% for item in stats_data.stats %}
+    <div class="stats-card" data-number="{{ item.number }}">
+        <div class="stats-number" onclick="goToSearch('{{ item.number }}')" style="cursor:pointer;">{{ item.number }}</div>
+        <div class="stats-counts">
+            <span class="stats-count stats-direct" onclick="openHistory('{{ item.number }}', 'direct')">
+                <span class="sc-label">直</span>
+                <span class="sc-num">{{ item.direct_count }}</span>
+            </span>
+            <span class="stats-count stats-group" onclick="openHistory('{{ item.number }}', 'group')">
+                <span class="sc-label">组</span>
+                <span class="sc-num">{{ item.group_count }}</span>
+            </span>
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+
+<!-- 分页 -->
+{% if stats_data and stats_data.total_pages and stats_data.total_pages > 1 %}
+<div class="pagination">
+    {% set base_url = '/' ~ lottery_code ~ '/stats?page=' %}
+    {% set cp = stats_data.current_page %}
+    {% set tp = stats_data.total_pages %}
+
+    {% if cp > 1 %}
+    <a href="{{ base_url }}1" class="page-link page-nav" title="首页">⟪</a>
+    <a href="{{ base_url }}{{ cp-1 }}" class="page-link page-nav" title="上一页">‹</a>
+    {% endif %}
+
+    {% set start = [cp-2, 1] | max %}
+    {% set end = [start+4, tp] | min %}
+    {% set start = [end-4, 1] | max %}
+
+    {% if start > 1 %}
+    <a href="{{ base_url }}1" class="page-link page-num">1</a>
+    {% if start > 2 %}<span class="page-ellipsis">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in range(start, end+1) %}
+    <a href="{{ base_url }}{{ p }}" class="page-link page-num {% if p == cp %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+
+    {% if end < tp %}
+    {% if end < tp-1 %}<span class="page-ellipsis">…</span>{% endif %}
+    <a href="{{ base_url }}{{ tp }}" class="page-link page-num">{{ tp }}</a>
+    {% endif %}
+
+    {% if cp < tp %}
+    <a href="{{ base_url }}{{ cp+1 }}" class="page-link page-nav" title="下一页">›</a>
+    <a href="{{ base_url }}{{ tp }}" class="page-link page-nav" title="末页">»</a>
+    {% endif %}
+
+    <span class="page-info">{{ cp }}/{{ tp }}</span>
+</div>
+{% endif %}
+
+<!-- 模态框 -->
+<div class="modal-overlay" id="historyModal">
+    <div class="modal-box">
+        <div class="modal-header">
+            <span id="modalTitle">历史开出详情</span>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="modalBody">
+            <div class="modal-loading">加载中…</div>
+        </div>
+        <div class="modal-footer">
+            <span id="modalInfo"></span>
+            <button class="btn-more" id="modalMoreBtn" style="display:none;" onclick="loadMore()">加载更多</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if stats_data and not stats_data.grouped_stats %}
+<script>
+var modalState = { number: '', searchType: 'group', page: 1, loading: false };
+
+function goToSearch(number) {
+    // 数字彩：将连续数字串转为逗号分隔
+    var code = '{{ lottery_code }}';
+    if (['3d', 'p3', 'p5', 'qxc'].indexOf(code) !== -1) {
+        var digits = number.split('').join(',');
+        window.location.href = '/' + code + '/search?q=' + digits + '&search_type=direct';
+    } else {
+        window.location.href = '/' + code + '/search?q=' + number + '&search_type=direct';
+    }
+}
+
+function openHistory(number, searchType) {
+    modalState.number = number;
+    modalState.searchType = searchType;
+    modalState.page = 1;
+    document.getElementById('modalTitle').textContent = '号码「' + number + '」历史开出详情';
+    document.getElementById('historyModal').style.display = 'flex';
+    document.getElementById('modalBody').innerHTML = '<div class="modal-loading">加载中…</div>';
+    document.getElementById('modalMoreBtn').style.display = 'none';
+    loadHistory();
+}
+
+function closeModal() {
+    document.getElementById('historyModal').style.display = 'none';
+}
+
+function loadHistory() {
+    if (modalState.loading) return;
+    modalState.loading = true;
+
+    var q = modalState.number;
+    var searchType = modalState.searchType;
+    var code = '{{ lottery_code }}';
+    // 数字彩：拆为逗号分隔；复合彩型：保持原样
+    if (['3d', 'p3', 'p5', 'qxc'].indexOf(code) !== -1) {
+        q = q.replace(/\s+/g, '').split('').join(',');
+    }
+
+    fetch('/api/' + '{{ lottery_code }}' + '/history-detail?q=' + encodeURIComponent(q) + '&search_type=' + searchType + '&page=' + modalState.page)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            modalState.loading = false;
+            var body = document.getElementById('modalBody');
+            var moreBtn = document.getElementById('modalMoreBtn');
+
+            if (modalState.page === 1) {
+                body.innerHTML = '';
+            }
+
+            if (data.data && data.data.length > 0) {
+                data.data.forEach(function(item) {
+                    var div = document.createElement('div');
+                    div.className = 'modal-row';
+
+                    var numbersHtml = '';
+                    var nums = item.numbers;
+                    if (Array.isArray(nums)) {
+                        numbersHtml = nums.join(' ');
+                    } else if (nums && typeof nums === 'object') {
+                        var parts = [];
+                        if (nums.red) parts.push(nums.red.join(' '));
+                        if (nums.blue !== undefined) parts.push(nums.blue + '');
+                        if (nums.front) parts.push(nums.front.join(' '));
+                        if (nums.back) parts.push(nums.back.join(' '));
+                        if (nums.main) parts.push(nums.main.join(' '));
+                        if (nums.special !== undefined) parts.push(nums.special + '');
+                        numbersHtml = parts.join(' | ');
+                    }
+
+                    var typeLabel = item.is_direct ? '直选' : '组选';
+                    var typeClass = item.is_direct ? 'tag-direct' : 'tag-group';
+
+                    div.innerHTML = '<span class="mr-number">' + item.draw_number + '</span>' +
+                        '<span class="mr-date">' + item.draw_date + '</span>' +
+                        '<span class="mr-nums">' + numbersHtml + '</span>' +
+                        '<span class="mr-type ' + typeClass + '">' + typeLabel + '</span>';
+                    body.appendChild(div);
+                });
+
+                if (data.total > modalState.page * 50) {
+                    moreBtn.style.display = 'inline-block';
+                    document.getElementById('modalInfo').textContent = '共 ' + data.total + ' 条，已显示 ' + (modalState.page * 50) + ' 条';
+                } else {
+                    moreBtn.style.display = 'none';
+                    document.getElementById('modalInfo').textContent = '共 ' + data.total + ' 条';
+                }
+            } else {
+                body.innerHTML = '<div class="modal-empty">暂无记录</div>';
+                moreBtn.style.display = 'none';
+                document.getElementById('modalInfo').textContent = '共 0 条';
+            }
+        })
+        .catch(function() {
+            modalState.loading = false;
+            document.getElementById('modalBody').innerHTML = '<div class="modal-empty">加载失败，请重试</div>';
+        });
+}
+
+function loadMore() {
+    modalState.page++;
+    loadHistory();
+}
+
+// 点击遮罩关闭
+document.getElementById('historyModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+
+// 客户端过滤
+function filterStats(val) {
+    var cards = document.querySelectorAll('.stats-card');
+    var visible = 0;
+    val = val.trim().toLowerCase();
+    cards.forEach(function(c) {
+        var num = c.getAttribute('data-number').toLowerCase();
+        if (!val || num.indexOf(val) !== -1) {
+            c.style.display = '';
+            visible++;
+        } else {
+            c.style.display = 'none';
+        }
+    });
+    document.getElementById('statsCount').innerHTML = '共 <strong>' + visible + '</strong> 个号码';
+}
+</script>
+{% endif %}
+{% endblock %}

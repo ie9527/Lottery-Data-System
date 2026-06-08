@@ -1,0 +1,564 @@
+{% extends "base.html" %}
+{% block title %}彩票数据系统 - 系统日志{% endblock %}
+
+{% block breadcrumb %}<span class="current">系统日志</span>{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><span style="font-size:22px;margin-right:8px;">📋</span>系统日志</h1>
+    <p class="page-desc">查看更新轮训日志和系统运行状态</p>
+</div>
+
+<div class="sys-grid">
+    <!-- 手动更新卡片 -->
+    <div class="sys-card">
+        <div class="sys-card-title">
+            <span>🔄</span> 手动更新
+        </div>
+        <div class="sys-card-body">
+            <div class="sys-status-row">
+                <span class="sys-label">冷却状态</span>
+                <span class="sys-value" id="sysCooldown">查询中...</span>
+            </div>
+            <div class="sys-status-row">
+                <span class="sys-label">冷却倒计时</span>
+                <span class="sys-value" id="sysCooldownCountdown">--</span>
+            </div>
+            <div class="sys-status-row">
+                <span class="sys-label">上次更新</span>
+                <span class="sys-value" id="sysLastUpdate">--</span>
+            </div>
+            <div class="sys-status-row">
+                <span class="sys-label">更新窗口</span>
+                <span class="sys-value" id="sysUpdateWindow">21:00~23:00</span>
+            </div>
+            <div class="sys-status-row">
+                <span class="sys-label">轮训状态</span>
+                <span class="sys-value" id="sysPollStatus">未启动</span>
+            </div>
+            <button class="sys-btn" id="sysManualBtn" onclick="sysManualUpdate(this)" disabled>
+                ⟳ 手动触发更新
+            </button>
+        </div>
+    </div>
+
+    <!-- 开奖时间配置 -->
+    <div class="sys-card">
+        <div class="sys-card-title">
+            <span>⏱</span> 开奖时间配置
+        </div>
+        <div class="sys-card-body">
+            <!-- 当前轮训状态 -->
+            <div class="sys-poll-status-bar" id="sysPollStatusBar">
+                <span class="sys-label">当前是否在轮训</span>
+                <span class="sys-value" id="sysPollStatusYesNo">
+                    <span class="poll-status-waiting">检测中...</span>
+                </span>
+            </div>
+            <div class="sys-table-wrap">
+                <table class="sys-table">
+                    <thead>
+                        <tr>
+                            <th>彩种</th>
+                            <th>开奖时间</th>
+                            <th>开奖日</th>
+                            <th>下次开奖</th>
+                            <th>更新状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sysDrawTimeBody">
+                        <tr><td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 轮训日志区域 -->
+<div class="sys-log-section">
+    <div class="sys-log-header">
+        <span>📝</span> 更新轮训日志
+        <button class="sys-btn-small" onclick="sysClearLog()">清空日志</button>
+    </div>
+    <div class="sys-log-body" id="sysLogBody">
+        <div class="sys-log-entry sys-log-info">系统启动，等待检测...</div>
+    </div>
+</div>
+
+<style>
+.sys-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+@media (max-width: 700px) {
+    .sys-grid { grid-template-columns: 1fr; }
+}
+
+.sys-card {
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    overflow: hidden;
+}
+.sys-card-title {
+    padding: 14px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.sys-card-body {
+    padding: 14px 18px;
+}
+.sys-status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+}
+.sys-status-row:last-of-type {
+    border-bottom: none;
+}
+.sys-label {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+.sys-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    font-family: var(--font-mono);
+}
+.sys-btn {
+    display: block;
+    width: 100%;
+    margin-top: 14px;
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+    background: linear-gradient(135deg, var(--primary), #7c4dff);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.15s;
+}
+.sys-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+.sys-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.sys-table-wrap {
+    overflow-x: auto;
+}
+.sys-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.sys-table th, .sys-table td {
+    padding: 6px 8px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-light);
+}
+.sys-table th {
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+.sys-table td {
+    color: var(--text);
+    font-family: var(--font-mono);
+}
+.sys-status-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+.sys-status-badge.success {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+.sys-status-badge.pending {
+    background: #fff3e0;
+    color: #e65100;
+}
+.sys-status-badge.waiting {
+    background: var(--bg);
+    color: var(--text-muted);
+}
+
+.sys-btn-small {
+    margin-left: auto;
+    padding: 3px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+.sys-btn-small:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+}
+
+.sys-log-section {
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    overflow: hidden;
+}
+.sys-log-header {
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.sys-log-body {
+    padding: 10px 18px;
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+}
+.sys-log-entry {
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border-light);
+    animation: logFadeIn 0.2s ease-out;
+}
+@keyframes logFadeIn {
+    from { opacity: 0; transform: translateX(-6px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+.sys-log-entry:last-child { border-bottom: none; }
+.sys-log-info { color: var(--text-muted); }
+.sys-log-success { color: #2e7d32; }
+.sys-log-error { color: #e53935; }
+.sys-log-warning { color: #e65100; }
+.sys-log-time {
+    color: var(--text-muted);
+    margin-right: 8px;
+}
+
+/* 轮训状态指示器 */
+.polling-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #2e7d32;
+    margin-right: 4px;
+    animation: pollingPulse 1.2s ease-in-out infinite;
+    vertical-align: middle;
+}
+@keyframes pollingPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* 开奖时间配置 - 轮训状态条 */
+.sys-poll-status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0 12px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+}
+.poll-status-yes {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #2e7d32;
+    font-weight: 700;
+}
+.poll-status-no {
+    color: var(--text-muted);
+    font-weight: 600;
+}
+.poll-status-waiting {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 12px;
+}
+.poll-status-yes .polling-dot {
+    width: 10px;
+    height: 10px;
+}
+
+/* 响应式设计：手机端适配 */
+@media (max-width: 480px) {
+    .sys-card-body { padding: 10px 12px; }
+    .sys-card-title { padding: 10px 12px; font-size: 13px; }
+    .sys-table { font-size: 11px; }
+    .sys-table th, .sys-table td { padding: 4px 6px; }
+    .sys-log-body { padding: 8px 12px; font-size: 11px; max-height: 300px; }
+    .sys-btn { padding: 8px; font-size: 12px; }
+    .sys-status-row { padding: 6px 0; }
+    .sys-label { font-size: 12px; }
+    .sys-value { font-size: 12px; }
+}
+@media (max-width: 360px) {
+    .sys-table th, .sys-table td { padding: 3px 4px; font-size: 10px; }
+    .sys-table th:nth-child(3),
+    .sys-table td:nth-child(3) { display: none; }
+}
+</style>
+
+<script>
+// ========== 状态变量 ==========
+var _sysLogCount = 0;
+var _cooldownInterval = null;
+var _cooldownSeconds = 0;
+var _drawTimeLoaded = false;
+
+// 轮训可见状态（通过 /api/system/status 中 polls_time 判断）
+var _pollingActive = false;
+
+// ========== 工具函数 ==========
+
+function getTimestamp() {
+    var d = new Date();
+    return d.toLocaleString('zh-CN', { hour12: false });
+}
+
+function addLog(msg, type) {
+    var body = document.getElementById('sysLogBody');
+    if (!body) return;
+    var entry = document.createElement('div');
+    entry.className = 'sys-log-entry sys-log-' + (type || 'info');
+    entry.innerHTML = '<span class="sys-log-time">[' + getTimestamp() + ']</span>' + msg;
+    body.appendChild(entry);
+    body.scrollTop = body.scrollHeight;
+    _sysLogCount++;
+    if (_sysLogCount > 200) {
+        body.removeChild(body.firstChild);
+        _sysLogCount--;
+    }
+}
+
+function sysClearLog() {
+    document.getElementById('sysLogBody').innerHTML = '';
+    _sysLogCount = 0;
+    addLog('日志已清空', 'info');
+}
+
+// ========== 冷却倒计时管理 ==========
+
+function updateCooldownDisplay(seconds) {
+    var el = document.getElementById('sysCooldown');
+    var countdownEl = document.getElementById('sysCooldownCountdown');
+    var btn = document.getElementById('sysManualBtn');
+    if (!el || !countdownEl || !btn) return;
+
+    if (seconds <= 0) {
+        el.textContent = '可执行更新';
+        el.style.color = '#2e7d32';
+        countdownEl.textContent = '立即执行';
+        countdownEl.style.color = '#2e7d32';
+        btn.disabled = false;
+        btn.textContent = '⟳ 手动触发更新';
+        if (_cooldownInterval) {
+            clearInterval(_cooldownInterval);
+            _cooldownInterval = null;
+        }
+    } else {
+        var min = Math.floor(seconds / 60);
+        var sec = seconds % 60;
+        el.textContent = '冷却中';
+        el.style.color = '#e65100';
+        countdownEl.textContent = min + '分' + (sec < 10 ? '0' : '') + sec + '秒';
+        countdownEl.style.color = '#e65100';
+        btn.disabled = true;
+        btn.textContent = '⟳ 冷却中 ' + min + '分' + sec + '秒';
+        _cooldownSeconds = seconds;
+        // 启动每秒递减
+        if (_cooldownInterval) clearInterval(_cooldownInterval);
+        _cooldownInterval = setInterval(function() {
+            _cooldownSeconds--;
+            if (_cooldownSeconds <= 0) {
+                // 冷却结束 → 重新查询后端
+                clearInterval(_cooldownInterval);
+                _cooldownInterval = null;
+                refreshSysStatus();
+            } else {
+                var m = Math.floor(_cooldownSeconds / 60);
+                var s = _cooldownSeconds % 60;
+                countdownEl.textContent = m + '分' + (s < 10 ? '0' : '') + s + '秒';
+                btn.textContent = '⟳ 冷却中 ' + m + '分' + s + '秒';
+            }
+        }, 1000);
+    }
+}
+
+// ========== 获取状态数据（合并接口） ==========
+async function refreshSysStatus() {
+    try {
+        var resp = await fetch('/api/system/status');
+        var result = await resp.json();
+        if (result.status !== 'success') throw new Error('API异常');
+
+        var data = result.data;
+
+        // 冷却状态
+        updateCooldownDisplay(data.cooldown);
+
+        // 轮训状态
+        var pollStatus = document.getElementById('sysPollStatus');
+        var isPolling = data.polling_active || false;
+        _pollingActive = isPolling;
+        if (isPolling) {
+            pollStatus.innerHTML = '<span class="polling-dot"></span> 轮训中 (' + new Date().toLocaleTimeString('zh-CN') + ')';
+            pollStatus.style.color = '#2e7d32';
+        } else {
+            pollStatus.textContent = '空闲';
+            pollStatus.style.color = 'var(--text-muted)';
+        }
+
+        // 开奖时间配置中的"当前是否在轮训"
+        var pollYesNo = document.getElementById('sysPollStatusYesNo');
+        if (pollYesNo) {
+            if (isPolling) {
+                pollYesNo.innerHTML = '<span class="poll-status-yes"><span class="polling-dot"></span> 是</span>';
+            } else {
+                pollYesNo.innerHTML = '<span class="poll-status-no">否</span>';
+            }
+        }
+
+        // 加载日志
+        if (data.logs && data.logs.length > 0) {
+            var logBody = document.getElementById('sysLogBody');
+            logBody.innerHTML = '';
+            _sysLogCount = 0;
+            data.logs.forEach(function(log) {
+                var statusLabel = log.status === 'success' ? '成功' :
+                                  log.status === 'catchup' ? '补数据' : log.status;
+                addLog('[' + log.lottery_code + '] ' + (log.message || statusLabel) +
+                       ' (+' + (log.records_added || 0) + '条)', 'success');
+            });
+        }
+
+        // 加载开奖时间配置表
+        if (data.countdown) {
+            loadDrawTimeConfigFromData(data.countdown, data.today_updated || []);
+        }
+
+    } catch(e) {
+        document.getElementById('sysCooldown').textContent = '查询失败';
+    }
+}
+
+// ========== 从已有数据渲染时间配置表（避免重复请求） ==========
+function loadDrawTimeConfigFromData(allData, todayUpdated) {
+    if (_drawTimeLoaded) return;
+    _drawTimeLoaded = true;
+
+    var tbody = document.getElementById('sysDrawTimeBody');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    var codes_order = ['dlt', 'ssq', 'p3', 'p5', '3d', 'qxc', '7lc', 'kl8'];
+    var meta = {
+        'dlt': { name: '大乐透', days: '一/三/六', time: '21:25' },
+        'ssq': { name: '双色球', days: '二/四', time: '21:15' },
+        'p3':  { name: '排列三', days: '每天', time: '21:25' },
+        'p5':  { name: '排列五', days: '每天', time: '21:25' },
+        '3d':  { name: '福彩3D', days: '每天', time: '21:15' },
+        'qxc': { name: '七星彩', days: '二/五', time: '21:25' },
+        '7lc': { name: '七乐彩', days: '一/三/五', time: '21:15' },
+        'kl8': { name: '快乐八', days: '每天', time: '21:30' },
+    };
+
+    var fragment = document.createDocumentFragment();
+    codes_order.forEach(function(code) {
+        var d = allData[code];
+        var m = meta[code] || {};
+        if (!d) return;
+
+        var tr = document.createElement('tr');
+        var nextDraw = d.next_draw || '--';
+        var isToday = d.is_draw_day;
+        var isAfterDraw = d.is_after_draw || false;
+        var wasUpdated = todayUpdated && todayUpdated.indexOf(code) >= 0;
+
+        var statusHtml;
+        if (isAfterDraw && wasUpdated) {
+            // 今日开奖时间已过 + 数据实际已更新
+            statusHtml = '<span class="sys-status-badge success">成功</span>';
+        } else if (isAfterDraw && !wasUpdated) {
+            // 今日开奖时间已过 + 数据未更新
+            statusHtml = '<span class="sys-status-badge pending">未更新</span>';
+        } else if (isToday && d.is_before_draw) {
+            statusHtml = '<span class="sys-status-badge waiting">待开奖</span>';
+        } else {
+            statusHtml = '<span class="sys-status-badge waiting">非开奖日</span>';
+        }
+
+        tr.innerHTML = '<td>' + m.name + '</td>' +
+            '<td>' + (m.time || d.draw_time) + '</td>' +
+            '<td>' + (m.days || d.draw_days_cn) + '</td>' +
+            '<td>' + (nextDraw ? nextDraw.slice(0, 16) : '--') + '</td>' +
+            '<td>' + statusHtml + '</td>';
+        fragment.appendChild(tr);
+    });
+    tbody.appendChild(fragment);
+}
+
+// ========== 手动更新 ==========
+async function sysManualUpdate(btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '⟳ 更新中...';
+    addLog('手动触发全量更新...', 'info');
+    try {
+        var resp = await fetch('/api/update/manual', { method: 'POST' });
+        var data = await resp.json();
+        if (data.status === 'success') {
+            addLog('全量更新成功 ✓', 'success');
+            document.getElementById('sysLastUpdate').textContent = getTimestamp();
+            // 刷新全部状态
+            _drawTimeLoaded = false;
+            refreshSysStatus();
+        } else if (data.status === 'cooldown') {
+            addLog('冷却中 (' + data.cooldown + '秒剩余)', 'warning');
+        } else {
+            addLog('更新失败: ' + (data.message || '未知错误'), 'error');
+        }
+    } catch(e) {
+        addLog('网络错误: ' + e.message, 'error');
+    }
+    refreshSysStatus();
+}
+
+// ========== 初始化 ==========
+document.addEventListener('DOMContentLoaded', function() {
+    addLog('系统页面加载完成', 'info');
+
+    // 首次加载（合并接口，一次请求获取全部状态）
+    refreshSysStatus();
+
+    // 定时刷新状态（每10秒）
+    setInterval(refreshSysStatus, 10000);
+
+    // visibilitychange 时主动刷新
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) refreshSysStatus();
+    });
+});
+</script>
+{% endblock %}

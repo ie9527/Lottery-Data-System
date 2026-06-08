@@ -1,0 +1,605 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="sep">›</span> <a href="/{{ lottery_code }}">{{ lottery_name }}</a>
+<span class="sep">›</span> <span class="current">号码查询</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ lottery_name }} <span class="subtitle">号码查询</span></h1>
+</div>
+
+<!-- 搜索卡片 -->
+<div class="search-card">
+    <form id="searchForm" method="get" action="/{{ lottery_code }}/search" onsubmit="return collectNumbers()">
+        <input type="hidden" name="q" id="queryInput" value="{{ query }}">
+        <input type="hidden" name="search_type" id="searchTypeInput" value="{{ search_type or 'group' }}">
+        <input type="hidden" name="page" value="1">
+
+        {% if lottery_code in ('ssq','dlt','7lc') %}
+        <!-- 乐透型：独立球号输入框 -->
+        {% set parts = query_parts %}
+        <div class="input-area">
+            {% if lottery_code == 'ssq' %}
+            <!-- 红球 6个 -->
+            <div class="input-section">
+                <div class="input-section-title">
+                    <span class="ist-icon" style="color:#e53935">●</span> 红球 (6个)
+                    <span class="ist-hint">输入 1-33 的数字</span>
+                </div>
+                <div class="ball-input-row" id="ssqRedRow">
+                    {% set red_vals = parts.red if parts and parts.red else ['','','','','',''] %}
+                    {% for i in range(6) %}
+                    <div class="ball-input-box">
+                        <input type="text" class="ball-input ball-input-red" maxlength="2" placeholder="--"
+                            data-zone="red" data-idx="{{ i }}"
+                            value="{{ red_vals[i] if red_vals[i] != None and red_vals[i]|string != '' else '' }}"
+                            oninput="onBallInput(this, {{ i }}, 6, 'ssqRedRow')"
+                            onkeydown="onBallBackspace(this, event)">
+                    </div>
+                    {% if i == 2 %}
+                    <span class="ball-sep-icon">+</span>
+                    {% endif %}
+                    {% endfor %}
+                    <span class="ball-zone-sep">+</span>
+                    <!-- 蓝球 1个 -->
+                    <div class="ball-input-box">
+                        <span class="ball-input-label" style="color:#1e88e5">蓝</span>
+                        <input type="text" class="ball-input ball-input-blue" maxlength="2" placeholder="--"
+                            data-zone="blue" data-idx="0"
+                            value="{{ parts.blue[0] if parts and parts.blue and parts.blue[0]|string != '' else '' }}"
+                            oninput="onBallInput(this, 0, 1, 'ssqRedRow')">
+                    </div>
+                </div>
+            </div>
+
+            {% elif lottery_code == 'dlt' %}
+            <!-- 前区 5个 -->
+            <div class="input-section">
+                <div class="input-section-title">
+                    <span class="ist-icon" style="color:#e53935">●</span> 前区 (5个)
+                    <span class="ist-hint">输入 1-35 的数字</span>
+                </div>
+                <div class="ball-input-row" id="dltFrontRow">
+                    {% set front_vals = parts.front if parts and parts.front else ['','','','',''] %}
+                    {% for i in range(5) %}
+                    <div class="ball-input-box">
+                        <input type="text" class="ball-input ball-input-red" maxlength="2" placeholder="--"
+                            data-zone="front" data-idx="{{ i }}"
+                            value="{{ front_vals[i] if front_vals[i] != None and front_vals[i]|string != '' else '' }}"
+                            oninput="onBallInput(this, {{ i }}, 5, 'dltFrontRow')"
+                            onkeydown="onBallBackspace(this, event)">
+                    </div>
+                    {% endfor %}
+                    <span class="ball-zone-sep">+</span>
+                    <!-- 后区 2个 -->
+                    {% set back_vals = parts.back if parts and parts.back else ['',''] %}
+                    {% for i in range(2) %}
+                    <div class="ball-input-box">
+                        <span class="ball-input-label" style="color:#1e88e5">后{{ i+1 }}</span>
+                        <input type="text" class="ball-input ball-input-blue" maxlength="2" placeholder="--"
+                            data-zone="back" data-idx="{{ i }}"
+                            value="{{ back_vals[i] if back_vals[i] != None and back_vals[i]|string != '' else '' }}"
+                            oninput="onBallInput(this, {{ i }}, 2, 'dltFrontRow')"
+                            onkeydown="onBallBackspace(this, event)">
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <!-- 全部分类搜索模式 -->
+            <div class="input-section" style="margin-top:8px;">
+                <label class="mode-checkbox" style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                    <input type="checkbox" id="dltAllMode" onchange="toggleDltAllMode(this)">
+                    <span>🔍 全部分类搜索</span>
+                    <span class="ist-hint">同时搜索前区和后区中的所有号码</span>
+                </label>
+            </div>
+
+            {% elif lottery_code == '7lc' %}
+            <div class="input-section">
+                <div class="input-section-title">
+                    <span class="ist-icon" style="color:#e53935">●</span> 基本号 (7个)
+                    <span class="ist-hint">输入 1-30 的数字</span>
+                </div>
+                <div class="ball-input-row" id="lcMainRow">
+                    {% set main_vals = parts.main if parts and parts.main else ['','','','','','',''] %}
+                    {% for i in range(7) %}
+                    <div class="ball-input-box">
+                        <input type="text" class="ball-input ball-input-red" maxlength="2" placeholder="--"
+                            data-zone="main" data-idx="{{ i }}"
+                            value="{{ main_vals[i] if main_vals[i] != None and main_vals[i]|string != '' else '' }}"
+                            oninput="onBallInput(this, {{ i }}, 7, 'lcMainRow')"
+                            onkeydown="onBallBackspace(this, event)">
+                    </div>
+                    {% endfor %}
+                    <span class="ball-zone-sep">+</span>
+                    <div class="ball-input-box">
+                        <span class="ball-input-label" style="color:#43a047">特</span>
+                        <input type="text" class="ball-input ball-input-green" maxlength="2" placeholder="--"
+                            data-zone="special" data-idx="0"
+                            value="{{ parts.special[0] if parts and parts.special and parts.special[0]|string != '' else '' }}"
+                            oninput="onBallInput(this, 0, 1, 'lcMainRow')">
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        {% elif lottery_code in ('3d','p3','p5','qxc') %}
+        <!-- 数字彩：球号输入框样式 -->
+        {% set digits_info = {'3d':[3,'百位,十位,个位','0-9'],'p3':[3,'百位,十位,个位','0-9'],'p5':[5,'万位,千位,百位,十位,个位','0-9'],'qxc':[7,'第1位,第2位,第3位,第4位,第5位,第6位,第7位','0-9']} %}
+        {% set info = digits_info.get(lottery_code, [3,'','0-9']) %}
+        {% set count = info[0] %}
+        {% set labels = info[1].split(',') %}
+        <div class="input-area">
+            <div class="input-section">
+                <div class="input-section-title">
+                    <span class="ist-icon" style="color:#e53935">●</span> 输入号码
+                    <span class="ist-hint">每位输入 {{ info[2] }} 的数字</span>
+                </div>
+                <div class="ball-input-row" id="digitBallRow">
+                    {% for i in range(count) %}
+                    <div class="ball-input-box">
+                        <span class="ball-input-label">{{ labels[i] if i < labels|length else '位' }}{{ i+1 }}</span>
+                        <input type="text" class="ball-input ball-input-red" maxlength="1" placeholder="?"
+                            data-digit="1" data-idx="{{ i }}"
+                            value="{{ query_parts[i] if query_parts is sequence and i < query_parts|length and query_parts[i]|string != '' else '' }}"
+                            oninput="onDigitBallInput(this, {{ i }}, {{ count }})"
+                            onkeydown="onDigitBallBackspace(this, event)">
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        {% elif lottery_code == 'kl8' %}
+        <!-- 快乐八：多号码输入区 -->
+        <div class="input-area">
+            <div class="input-section">
+                <div class="input-section-title">
+                    <span class="ist-icon" style="color:#43a047">●</span> 快乐八号码
+                    <span class="ist-hint">点击号码选择或手动输入，支持多选组合搜索</span>
+                </div>
+                <input type="text" id="kl8Input" class="input kl8-input" placeholder="如: 3,11,25,37,42" value="{{ query_parts|join(',') if query_parts is sequence else query }}">
+                <div class="kl8-input-hint" id="kl8Hint"></div>
+                <!-- 号码网格选择器 1-80 -->
+                <div class="kl8-grid" id="kl8Grid" style="margin-top:10px;">
+                    {% for n in range(1, 81) %}
+                    <span class="kl8-grid-item" data-num="{{ n }}" onclick="toggleKl8Num(this)">
+                        {{ '%02d' % n }}
+                    </span>
+                    {% endfor %}
+                </div>
+                <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+                    <span id="kl8SelectedCount" style="font-size:12px;color:var(--text-muted);">已选 0 个号码</span>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="clearKl8Grid()" style="font-size:11px;">清空选择</button>
+                </div>
+            </div>
+        </div>
+
+        {% else %}
+        <!-- 数字彩输入（3D/P3/P5/QXC） -->
+        {% set digits_count = {'3d':3,'p3':3,'p5':5,'qxc':7} %}
+        {% set count = digits_count.get(lottery_code, 3) %}
+        <div class="input-area">
+            <div class="input-section">
+                <div class="input-section-title">
+                    <span class="ist-icon">🔢</span> 输入号码
+                    <span class="ist-hint">每位输入 0-9 的数字</span>
+                </div>
+                <div class="num-input-row" id="numInputs">
+                    {% for i in range(count) %}
+                    <div class="num-box">
+                        <span class="num-box-label">
+                            {% if lottery_code == '3d' %}{{ ['百位','十位','个位'][i] if i < 3 else '' }}
+                            {% elif lottery_code == 'p3' %}{{ ['百位','十位','个位'][i] if i < 3 else '' }}
+                            {% elif lottery_code == 'p5' %}{{ ['万位','千位','百位','十位','个位'][i] if i < 5 else '' }}
+                            {% else %}{{ ['第1位','第2位','第3位','第4位','第5位','第6位','第7位'][i] }}{% endif %}
+                        </span>
+                        <input type="text" class="ni ni-red" maxlength="1" placeholder="?"
+                            data-idx="{{ i }}"
+                            value="{{ query_parts[i] if query_parts is sequence and i < query_parts|length else '' }}"
+                            oninput="autoJump(this, {{ i }}, {{ count }})"
+                            onkeydown="handleBackspace(this, event)">
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 操作栏 -->
+        <div class="action-row">
+            <div class="mode-group">
+                <label class="mode-radio {% if search_type == 'direct' %}active{% endif %}">
+                    <input type="radio" name="mode" value="direct" onchange="switchMode('direct')"
+                        {% if search_type == 'direct' %}checked{% endif %}>
+                    直选
+                    <small>精确位置</small>
+                </label>
+                <label class="mode-radio {% if search_type != 'direct' %}active{% endif %}">
+                    <input type="radio" name="mode" value="group" onchange="switchMode('group')"
+                        {% if search_type != 'direct' %}checked{% endif %}>
+                    组选
+                    <small>忽略顺序</small>
+                </label>
+            </div>
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary">🔍 查询</button>
+                <button type="reset" class="btn btn-outline" onclick="clearAll()">✕ 清空</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+{% if query %}
+<!-- 结果统计 -->
+{% if count_info and lottery_code not in ('ssq','dlt','7lc','kl8') %}
+<div class="history-count-box">
+    <div class="history-count-title">📊 查询号码: <strong>{{ query }}</strong> 的历史数据</div>
+    <div class="history-count-row">
+        <div class="count-item count-item-direct" onclick="window.location.href='?q={{ query }}&search_type=direct&page=1'">
+            <span class="count-label">直选</span>
+            <span class="count-number">{{ count_info.direct_count or 0 }}</span>
+            <span class="count-unit">次</span>
+        </div>
+        <div class="count-item count-item-group" onclick="window.location.href='?q={{ query }}&search_type=group&page=1'">
+            <span class="count-label">组选</span>
+            <span class="count-number">{{ count_info.group_count or 0 }}</span>
+            <span class="count-unit">次</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- 结果列表 -->
+<div class="result-bar">
+    <span>共找到 <strong>{{ total }}</strong> 条符合的记录</span>
+    {% if total > 0 %}
+    <a href="/api/{{ lottery_code }}/export?export_type=search&q={{ query|urlencode }}&search_type={{ search_type }}" class="btn btn-sm btn-outline" style="margin-left:12px;text-decoration:none;" download>📥 导出CSV</a>
+    {% endif %}
+</div>
+
+<div class="table-wrap" style="margin-top:12px;">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>期号</th>
+                <th>日期</th>
+                <th>开奖号码</th>
+                <th>匹配类型</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if results %}
+            {% for row in results %}
+            <tr>
+                <td><strong style="font-family:var(--font-mono)">{{ row.draw_number }}</strong></td>
+                <td style="font-size:12px;color:var(--text-secondary)">{{ row.draw_date }}</td>
+                <td class="num-cell">
+                    {% set query_nums = query_parts if query_parts is sequence else query.split(',') %}
+                    {% if row.numbers is mapping %}
+                        {% if row.numbers.red is defined %}
+                            {% for n in row.numbers.red %}
+                            <span class="ball-sm ball-red-sm">{{ n }}</span>
+                            {% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            {% if row.numbers.blue is defined %}<span class="ball-sm ball-blue-sm">{{ row.numbers.blue }}</span>{% endif %}
+                        {% elif row.numbers.front is defined %}
+                            {% for n in row.numbers.front %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            {% for n in row.numbers.back %}<span class="ball-sm ball-blue-sm">{{ n }}</span>{% endfor %}
+                        {% elif row.numbers.main is defined %}
+                            {% for n in row.numbers.main %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            <span class="ball-sm" style="background:var(--c-kl8)">{{ row.numbers.special }}</span>
+                        {% endif %}
+                    {% elif row.numbers is sequence %}
+                        {% for n in row.numbers %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                    {% endif %}
+                </td>
+                <td><span class="mr-type {% if row.is_direct %}tag-direct{% else %}tag-group{% endif %}">{{ '直选' if row.is_direct else '组选' }}</span></td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+                <td colspan="4"><div class="empty-state"><p>未找到匹配记录</p></div></td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- 分页 -->
+{% if total > 30 %}
+{% set per_page = 30 %}
+{% set total_pages = ((total / per_page) | round(0, 'ceil')) | int %}
+<div class="pagination">
+    {% set base_url = '?q=' ~ query ~ '&search_type=' ~ search_type ~ '&page=' %}
+    {% set cp = page %}
+
+    {% if cp > 1 %}
+    <a href="{{ base_url }}1" class="page-link page-nav" title="首页">⟪</a>
+    <a href="{{ base_url }}{{ cp-1 }}" class="page-link page-nav" title="上一页">‹</a>
+    {% endif %}
+
+    {% set start = [cp-2, 1] | max %}
+    {% set end = [start+4, total_pages] | min %}
+    {% set start = [end-4, 1] | max %}
+
+    {% if start > 1 %}
+    <a href="{{ base_url }}1" class="page-link page-num">1</a>
+    {% if start > 2 %}<span class="page-ellipsis">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in range(start, end+1) %}
+    <a href="{{ base_url }}{{ p }}" class="page-link page-num {% if p == cp %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+
+    {% if end < total_pages %}
+    {% if end < total_pages-1 %}<span class="page-ellipsis">…</span>{% endif %}
+    <a href="{{ base_url }}{{ total_pages }}" class="page-link page-num">{{ total_pages }}</a>
+    {% endif %}
+
+    {% if cp < total_pages %}
+    <a href="{{ base_url }}{{ cp+1 }}" class="page-link page-nav" title="下一页">›</a>
+    <a href="{{ base_url }}{{ total_pages }}" class="page-link page-nav" title="末页">»</a>
+    {% endif %}
+
+    <span class="page-info">{{ cp }}/{{ total_pages }}</span>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ========== 大乐透全部分类搜索模式 ==========
+function toggleDltAllMode(cb) {
+    var frontInputs = document.querySelectorAll('.ball-input[data-zone="front"]');
+    var backInputs = document.querySelectorAll('.ball-input[data-zone="back"]');
+    var zoneLabel = document.querySelectorAll('.ball-input-label');
+    if (cb.checked) {
+        // 全部分类模式：淡化区域标识
+        frontInputs.forEach(function(el) { el.style.borderColor = '#43a047'; });
+        backInputs.forEach(function(el) { el.style.borderColor = '#43a047'; });
+    } else {
+        frontInputs.forEach(function(el) { el.style.borderColor = ''; });
+        backInputs.forEach(function(el) { el.style.borderColor = ''; });
+    }
+}
+
+// ========== 快乐八号码网格选择 ==========
+function toggleKl8Num(el) {
+    el.classList.toggle('active');
+    updateKl8SelectedCount();
+    syncKl8Input();
+}
+
+function clearKl8Grid() {
+    document.querySelectorAll('.kl8-grid-item.active').forEach(function(el) {
+        el.classList.remove('active');
+    });
+    updateKl8SelectedCount();
+    syncKl8Input();
+}
+
+function updateKl8SelectedCount() {
+    var count = document.querySelectorAll('.kl8-grid-item.active').length;
+    var el = document.getElementById('kl8SelectedCount');
+    if (el) el.textContent = '已选 ' + count + ' 个号码';
+}
+
+function syncKl8Input() {
+    var selected = [];
+    document.querySelectorAll('.kl8-grid-item.active').forEach(function(el) {
+        selected.push(el.dataset.num);
+    });
+    var kl8Input = document.getElementById('kl8Input');
+    if (kl8Input && selected.length > 0) {
+        kl8Input.value = selected.join(',');
+        // 触发input事件更新提示
+        var evt = new Event('input');
+        kl8Input.dispatchEvent(evt);
+    }
+}
+
+// ========== 乐透型球号输入控制 ==========
+function onBallInput(el, idx, total, rowId) {
+    // 只允许数字
+    el.value = el.value.replace(/\D/g, '');
+    var zone = el.dataset.zone;
+
+    // 自动跳到下一个
+    if (el.value.length >= 2 && idx < total - 1) {
+        var row = document.getElementById(rowId);
+        if (row) {
+            var next = row.querySelector('.ball-input[data-zone="' + zone + '"][data-idx="' + (idx + 1) + '"]');
+            if (next) next.focus();
+        }
+    }
+}
+
+function onBallBackspace(el, e) {
+    if (e.key === 'Backspace' && !el.value) {
+        var idx = parseInt(el.dataset.idx);
+        var zone = el.dataset.zone;
+        if (idx > 0) {
+            var prev = document.querySelector('.ball-input[data-zone="' + zone + '"][data-idx="' + (idx - 1) + '"]');
+            if (prev) { prev.focus(); prev.value = ''; }
+        }
+    }
+}
+
+// ========== 数字彩输入框跳转（保留） ==========
+function autoJump(el, idx, count) {
+    el.value = el.value.replace(/\D/g, '').slice(0, 1);
+    if (el.value && idx < count - 1) {
+        var next = document.querySelector('.ni[data-idx="' + (idx + 1) + '"]');
+        if (next) next.focus();
+    }
+}
+function handleBackspace(el, e) {
+    if (e.key === 'Backspace' && !el.value) {
+        var idx = parseInt(el.dataset.idx);
+        if (idx > 0) {
+            var prev = document.querySelector('.ni[data-idx="' + (idx - 1) + '"]');
+            if (prev) { prev.focus(); prev.value = ''; }
+        }
+    }
+}
+
+// ========== 数字彩球号输入控制 ==========
+function onDigitBallInput(el, idx, total) {
+    el.value = el.value.replace(/\D/g, '').slice(0, 1);
+    if (el.value && idx < total - 1) {
+        var next = document.querySelector('.ball-input[data-digit="1"][data-idx="' + (idx + 1) + '"]');
+        if (next) next.focus();
+    }
+}
+function onDigitBallBackspace(el, e) {
+    if (e.key === 'Backspace' && !el.value) {
+        var idx = parseInt(el.dataset.idx);
+        if (idx > 0) {
+            var prev = document.querySelector('.ball-input[data-digit="1"][data-idx="' + (idx - 1) + '"]');
+            if (prev) { prev.focus(); prev.value = ''; }
+        }
+    }
+}
+
+// ========== 模式切换 ==========
+function switchMode(mode) {
+    document.querySelectorAll('.mode-radio').forEach(function(el) {
+        el.classList.toggle('active', el.querySelector('input').value === mode);
+    });
+    document.getElementById('searchTypeInput').value = mode;
+}
+
+// ========== 收集号码并提交 ==========
+function collectNumbers() {
+    var mode = document.querySelector('.mode-radio.active input');
+    if (mode) document.getElementById('searchTypeInput').value = mode.value;
+
+    // 数字彩球号输入（.ball-input[data-digit] 输入框）
+    var digitInputs = document.querySelectorAll('.ball-input[data-digit="1"]');
+    if (digitInputs.length > 0) {
+        var nums = [];
+        digitInputs.forEach(function(inp) {
+            var v = inp.value.trim();
+            nums.push(v || '');
+        });
+        document.getElementById('queryInput').value = nums.join(',');
+        return true;
+    }
+
+    // 乐透型球号输入（.ball-input 输入框）
+    var ballInputs = document.querySelectorAll('.ball-input:not([data-digit])');
+    if (ballInputs.length > 0) {
+        var redNums = [];
+        var blueNums = [];
+        var dltAllMode = document.getElementById('dltAllMode');
+        var isDltAll = dltAllMode && dltAllMode.checked;
+
+        ballInputs.forEach(function(inp) {
+            var v = inp.value.trim();
+            var zone = inp.dataset.zone;
+            if (!v) return;
+            if (isDltAll) {
+                // 全部分类：所有号码合并到一个集合
+                redNums.push(v);
+            } else if (zone === 'red' || zone === 'front' || zone === 'main') {
+                redNums.push(v);
+            } else if (zone === 'blue' || zone === 'back' || zone === 'special') {
+                blueNums.push(v);
+            }
+        });
+        var q = '';
+        if (isDltAll) {
+            // 使用 "all:" 前缀标识全部分类搜索
+            q = 'all:' + redNums.join(',');
+            if (blueNums.length > 0) q += '|' + blueNums.join(',');
+        } else {
+            if (redNums.length > 0) q += redNums.join(',');
+            if (blueNums.length > 0) {
+                if (q) q += '|';
+                q += blueNums.join(',');
+            }
+        }
+        document.getElementById('queryInput').value = q;
+        return true;
+    }
+
+    // KL8 输入（合并网格选择和手动输入）
+    var kl8Input = document.getElementById('kl8Input');
+    if (kl8Input) {
+        document.getElementById('queryInput').value = extractNumbers(kl8Input.value).join(',');
+        return true;
+    }
+
+    return true;
+}
+
+// ========== KL8实时提示 ==========
+document.addEventListener('DOMContentLoaded', function() {
+    var kl8Input = document.getElementById('kl8Input');
+    var kl8Hint = document.getElementById('kl8Hint');
+    if (kl8Input && kl8Hint) {
+        kl8Input.addEventListener('input', function() {
+            var nums = extractNumbers(this.value);
+            if (nums.length > 0) {
+                kl8Hint.textContent = '已识别 ' + nums.length + ' 个号码: ' + nums.join(', ');
+                kl8Hint.className = 'kl8-input-hint kl8-hint-ok';
+            } else if (this.value.trim()) {
+                kl8Hint.textContent = '暂未识别到有效号码';
+                kl8Hint.className = 'kl8-input-hint kl8-hint-empty';
+            } else {
+                kl8Hint.textContent = '';
+            }
+        });
+    }
+});
+
+// ========== 智能号码提取（忽略任何非数字字符） ==========
+function extractNumbers(text) {
+    // 用正则提取所有数字，自动忽略逗号、空格、顿号、分号、竖线等
+    var matches = text.match(/\d{1,2}/g);
+    if (!matches) return [];
+    var nums = [];
+    matches.forEach(function(m) {
+        var n = parseInt(m, 10);
+        if (!isNaN(n) && n > 0 && n <= 80) {
+            nums.push(n);
+        }
+    });
+    // 去重保留顺序
+    var seen = {};
+    return nums.filter(function(n) {
+        if (seen[n]) return false;
+        seen[n] = true;
+        return true;
+    });
+}
+
+// ========== 清空所有输入 ==========
+function clearAll() {
+    document.querySelectorAll('.ball-input').forEach(function(el) { el.value = ''; });
+    var kl8Input = document.getElementById('kl8Input');
+    if (kl8Input) { kl8Input.value = ''; }
+    // 清空KL8网格
+    document.querySelectorAll('.kl8-grid-item.active').forEach(function(el) { el.classList.remove('active'); });
+    updateKl8SelectedCount();
+    // 重置大乐透全部分类模式
+    var dltAllMode = document.getElementById('dltAllMode');
+    if (dltAllMode) {
+        dltAllMode.checked = false;
+        toggleDltAllMode(dltAllMode);
+    }
+    document.getElementById('queryInput').value = '';
+    // 聚焦第一个输入框
+    var first = document.querySelector('.ball-input[data-idx="0"]');
+    if (first) first.focus();
+}
+</script>
+{% endblock %}

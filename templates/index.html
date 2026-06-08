@@ -1,0 +1,702 @@
+{% extends "base.html" %}
+{% block title %}彩票数据系统 - 首页{% endblock %}
+
+{% block breadcrumb %}<span class="current">首页</span>{% endblock %}
+
+{% block content %}
+<div class="page-header" style="border:none;padding-bottom:0;margin-bottom:20px;">
+    <div>
+        <h1 style="margin:0;font-size:24px;font-weight:700;background:linear-gradient(135deg,var(--primary),#7c4dff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+            最新开奖概览
+        </h1>
+        <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);-webkit-text-fill-color:var(--text-muted);">
+            数据库共 <strong style="color:var(--text-secondary)">{{ total_records }}</strong> 条开奖记录
+        </p>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- 开奖倒计时模块（视觉分离区域） -->
+<!-- ============================================ -->
+<div class="countdown-section" id="countdown-section">
+    <div class="countdown-section-header">
+        <span class="countdown-section-icon">⏱</span>
+        <span class="countdown-section-title">开奖倒计时</span>
+        <span class="countdown-section-badge" id="countdownStatus">倒计时中</span>
+    </div>
+    <div class="countdown-grid" id="countdownGrid">
+        {% set cd_list = [
+            ('dlt','大乐透','一/三/六','21:25','#7b1fa2','#9c27b0'),
+            ('ssq','双色球','二/四','21:15','#1565c0','#1976d2'),
+            ('p3','排列三','每天','21:25','#f57c00','#fb8c00'),
+            ('p5','排列五','每天','21:25','#ffa000','#ffc107'),
+            ('3d','福彩3D','每天','21:15','#e53935','#ef5350'),
+            ('qxc','七星彩','二/五','21:25','#00838f','#00acc1'),
+            ('7lc','七乐彩','一/三/五','21:15','#c2185b','#e91e63'),
+            ('kl8','快乐八','每天','21:30','#2e7d32','#43a047'),
+        ] %}
+        {% for code, name, days, draw_time, c1, c2 in cd_list %}
+        <div class="countdown-card" data-code="{{ code }}">
+            <div class="countdown-card-accent" style="background:linear-gradient(90deg,{{ c1 }},{{ c2 }})"></div>
+            <div class="countdown-card-header">
+                <span class="countdown-card-name">{{ name }}</span>
+                <span class="countdown-card-days">{{ days }}</span>
+            </div>
+            <div class="countdown-card-body">
+                <div class="countdown-timer" id="cd-{{ code }}">--:--:--</div>
+                <div class="countdown-meta">
+                    <span class="countdown-time">开奖 {{ draw_time }}</span>
+                    <span class="countdown-date" id="cd-{{ code }}-date">--</span>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- 轮训状态指示器 -->
+<div id="pollingBar" class="polling-bar" style="display:none;">
+    <span class="polling-spinner"></span>
+    <span id="pollingText" class="polling-text">检查最新数据...</span>
+</div>
+
+<!-- 统计卡片 -->
+<div class="home-stats-grid">
+    <div class="home-stat-card home-stat-card-1" style="--accent:#4f6ef7">
+        <div class="home-stat-icon">🎯</div>
+        <div class="home-stat-body">
+            <div class="home-stat-value">{{ types|length }}</div>
+            <div class="home-stat-label">彩种数量</div>
+        </div>
+        <div class="home-stat-bg"></div>
+    </div>
+    <div class="home-stat-card home-stat-card-2" style="--accent:#43a047">
+        <div class="home-stat-icon">📊</div>
+        <div class="home-stat-body">
+            <div class="home-stat-value">{{ total_records }}</div>
+            <div class="home-stat-label">开奖记录</div>
+        </div>
+        <div class="home-stat-bg"></div>
+    </div>
+    <div class="home-stat-card home-stat-card-3" style="--accent:#fb8c00">
+        <div class="home-stat-icon">📅</div>
+        <div class="home-stat-body">
+            <div class="home-stat-value">{{ latest_draws|length }}</div>
+            <div class="home-stat-label">最新期数</div>
+        </div>
+        <div class="home-stat-bg"></div>
+    </div>
+    <div class="home-stat-card home-stat-card-4" style="--accent:#e53935">
+        <div class="home-stat-icon">🔥</div>
+        <div class="home-stat-body">
+            <div class="home-stat-value">{{ latest_draws|selectattr('draw')|list|length }}</div>
+            <div class="home-stat-label">今日更新</div>
+        </div>
+        <div class="home-stat-bg"></div>
+    </div>
+</div>
+
+<!-- 最新开奖号码展示区域 -->
+<div class="home-section-divider">
+    <span class="home-section-divider-icon">🎰</span>
+    <span class="home-section-divider-text">最新开奖号码</span>
+</div>
+
+<!-- 卡片网格 -->
+<div class="home-card-grid">
+    {% for item in latest_draws %}
+    {% set t = item.type %}
+    {% set draw = item.draw %}
+    {% set code = t.code %}
+    {% set colors = {'3d':'#e53935','p3':'#f57c00','p5':'#ffa000','ssq':'#1565c0','dlt':'#7b1fa2','qxc':'#00838f','7lc':'#c2185b','kl8':'#2e7d32'} %}
+    {% set color = colors.get(code, '#4f6ef7') %}
+    <div class="home-card" style="--card-accent:{{ color }}" data-delay="{{ loop.index0 * 60 }}">
+        <div class="home-card-accent"></div>
+        <div class="home-card-header">
+            <div class="home-card-title-row">
+                <h2 class="home-card-title">
+                    <a href="/{{ code }}">{{ t.name }}</a>
+                </h2>
+                {% if draw %}
+                <span class="home-card-draw">{{ draw.draw_number }}期</span>
+                {% endif %}
+            </div>
+            {% if draw %}
+            <div class="home-card-meta">
+                <span class="home-card-date">{{ draw.draw_date }}</span>
+                <a href="/{{ code }}/today" class="home-card-today-link" title="历史的今天">📅</a>
+            </div>
+            {% endif %}
+        </div>
+        <div class="home-card-body">
+            {% if draw %}
+            <!-- 号码展示 -->
+            {% if draw.numbers is mapping %}
+                {% if draw.numbers.red is defined %}
+                <div class="home-ball-row">
+                    {% for n in draw.numbers.red %}
+                    <span class="home-ball home-ball-red">{{ n }}</span>
+                    {% endfor %}
+                    <span class="home-ball-sep">+</span>
+                    {% if draw.numbers.blue is defined %}
+                    <span class="home-ball home-ball-blue">{{ draw.numbers.blue }}</span>
+                    {% endif %}
+                </div>
+                {% elif draw.numbers.front is defined %}
+                <div class="home-ball-row">
+                    {% for n in draw.numbers.front %}
+                    <span class="home-ball home-ball-red">{{ n }}</span>
+                    {% endfor %}
+                    <span class="home-ball-sep">+</span>
+                    {% for n in draw.numbers.back %}
+                    <span class="home-ball home-ball-blue">{{ n }}</span>
+                    {% endfor %}
+                </div>
+                {% elif draw.numbers.main is defined %}
+                <div class="home-ball-row">
+                    {% for n in draw.numbers.main %}
+                    <span class="home-ball home-ball-red">{{ n }}</span>
+                    {% endfor %}
+                    <span class="home-ball-sep">+</span>
+                    <span class="home-ball home-ball-green">{{ draw.numbers.special }}</span>
+                </div>
+                {% endif %}
+            {% elif draw.numbers is sequence %}
+                <div class="home-ball-row">
+                    {% for n in draw.numbers %}
+                    <span class="home-ball home-ball-red">{{ n }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <!-- 试机号 -->
+            {% if draw.trial_numbers and draw.trial_numbers is sequence %}
+            <div class="home-trial-row">
+                <span class="home-trial-label">试机号</span>
+                {% for n in draw.trial_numbers %}
+                <span class="home-trial-num">{{ n }}</span>
+                {% endfor %}
+                {% if draw.machine_ball %}
+                <span class="home-trial-machine">机球 {{ draw.machine_ball|join(' ') }}</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="home-empty-draw">暂无开奖数据</div>
+            {% endif %}
+        </div>
+        <div class="home-card-footer">
+            <a href="/{{ code }}/search" class="home-footer-link home-footer-search">🔍 号码搜索</a>
+            <a href="/{{ code }}" class="home-footer-link home-footer-detail">查看详情 →</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<style>
+/* ========== 开奖倒计时模块 ========== */
+.countdown-section {
+    background: var(--bg-card);
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    padding: 16px 18px;
+    margin-bottom: 20px;
+}
+.countdown-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-light);
+}
+.countdown-section-icon { font-size: 18px; }
+.countdown-section-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+.countdown-section-badge {
+    margin-left: auto;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.countdown-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+@media (max-width: 1000px) {
+    .countdown-grid { grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 700px) {
+    .countdown-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 450px) {
+    .countdown-grid { grid-template-columns: 1fr; }
+}
+
+.countdown-card {
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.countdown-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+}
+.countdown-card-accent {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+}
+.countdown-card-header {
+    padding: 14px 16px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.countdown-card-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+.countdown-card-days {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--bg);
+}
+.countdown-card-body {
+    padding: 10px 16px;
+    text-align: center;
+}
+.countdown-timer {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 2px;
+    color: var(--text);
+    transition: color 0.3s;
+}
+.countdown-timer.cd-warning { color: #e53935; }
+.countdown-timer.cd-upcoming { color: #43a047; }
+.countdown-meta {
+    margin-top: 4px;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* ========== 轮训状态栏 ========== */
+.polling-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+    border: 1px solid #a5d6a7;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #2e7d32;
+}
+.polling-bar.polling-error {
+    background: linear-gradient(135deg, #fff3e0, #ffe0b2);
+    border-color: #ffcc80;
+    color: #e65100;
+}
+.polling-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #a5d6a7;
+    border-top-color: #2e7d32;
+    border-radius: 50%;
+    animation: pollSpin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+.polling-bar.polling-error .polling-spinner {
+    border-color: #ffcc80;
+    border-top-color: #e65100;
+}
+@keyframes pollSpin { to { transform: rotate(360deg); } }
+.polling-text { flex: 1; }
+
+/* ========== 分割线标题 ========== */
+.home-section-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0 18px;
+    padding: 0 4px;
+}
+.home-section-divider::before,
+.home-section-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+.home-section-divider-icon { font-size: 18px; }
+.home-section-divider-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* ========== 首页统计卡片 ========== */
+.home-stats-grid {
+    display:grid; grid-template-columns:repeat(4,1fr); gap:14px;
+    margin-bottom:20px;
+}
+@media (max-width:600px) { .home-stats-grid { grid-template-columns:repeat(2,1fr); } }
+
+.home-stat-card {
+    position:relative; overflow:hidden;
+    border-radius:12px; padding:18px 20px;
+    display:flex; align-items:center; gap:14px;
+    background:var(--bg-card); border:1px solid var(--border);
+    transition:transform 0.2s, box-shadow 0.2s;
+}
+.home-stat-card:hover {
+    transform:translateY(-2px);
+    box-shadow:0 6px 20px rgba(0,0,0,0.08);
+}
+.home-stat-icon {
+    font-size:28px; width:48px; height:48px;
+    display:flex; align-items:center; justify-content:center;
+    border-radius:12px;
+    background:color-mix(in srgb, var(--accent) 12%, transparent);
+    flex-shrink:0;
+}
+.home-stat-body { position:relative; z-index:1; }
+.home-stat-value { font-size:26px; font-weight:700; line-height:1.2; color:var(--text-primary); }
+.home-stat-label { font-size:12px; color:var(--text-muted); margin-top:2px; }
+.home-stat-bg {
+    position:absolute; right:-10px; bottom:-10px;
+    width:80px; height:80px; border-radius:50%;
+    background:color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* ========== 首页卡片网格 ========== */
+.home-card-grid {
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:16px;
+}
+@media (max-width:400px) {
+    .home-card-grid { grid-template-columns:1fr; }
+}
+
+.home-card {
+    --card-accent:#4f6ef7;
+    position:relative; overflow:hidden;
+    border-radius:14px; border:1px solid var(--border);
+    background:var(--bg-card);
+    transition:transform 0.25s cubic-bezier(.4,0,.2,1), box-shadow 0.25s;
+    opacity:0; animation:homeCardIn 0.4s ease-out forwards;
+}
+@keyframes homeCardIn {
+    from { opacity:0; transform:translateY(20px); }
+    to { opacity:1; transform:translateY(0); }
+}
+.home-card:nth-child(1) { animation-delay:0.05s; }
+.home-card:nth-child(2) { animation-delay:0.1s; }
+.home-card:nth-child(3) { animation-delay:0.15s; }
+.home-card:nth-child(4) { animation-delay:0.2s; }
+.home-card:nth-child(5) { animation-delay:0.25s; }
+.home-card:nth-child(6) { animation-delay:0.3s; }
+.home-card:nth-child(7) { animation-delay:0.35s; }
+.home-card:nth-child(8) { animation-delay:0.4s; }
+
+.home-card:hover {
+    transform:translateY(-4px);
+    box-shadow:0 12px 32px rgba(0,0,0,0.1);
+    border-color:color-mix(in srgb, var(--card-accent), transparent 60%);
+}
+.home-card-accent {
+    position:absolute; top:0; left:0; right:0; height:3px;
+    background:linear-gradient(90deg, var(--card-accent), color-mix(in srgb, var(--card-accent) 60%, #fff));
+}
+.home-card-header {
+    padding:16px 18px 0; position:relative;
+}
+.home-card-title-row {
+    display:flex; justify-content:space-between; align-items:center;
+}
+.home-card-title { margin:0; font-size:17px; font-weight:600; }
+.home-card-title a { color:var(--card-accent); text-decoration:none; }
+.home-card-title a:hover { text-decoration:underline; }
+.home-card-draw {
+    font-size:12px; font-weight:600; padding:2px 8px;
+    border-radius:6px; background:var(--bg-muted); color:var(--text-secondary);
+    font-family:var(--font-mono);
+}
+.home-card-meta {
+    display:flex; justify-content:space-between; align-items:center;
+    margin-top:4px; font-size:12px; color:var(--text-muted);
+}
+.home-card-today-link { text-decoration:none; opacity:0.6; transition:opacity 0.15s; }
+.home-card-today-link:hover { opacity:1; }
+
+.home-card-body {
+    padding:14px 18px; min-height:50px;
+}
+.home-ball-row {
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+}
+.home-ball {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:34px; height:34px; border-radius:50%;
+    font-size:13px; font-weight:700; font-family:var(--font-mono);
+    transition:transform 0.15s;
+}
+.home-card:hover .home-ball {
+    transform:scale(1.05);
+}
+.home-ball-red { background:linear-gradient(135deg,#ff1744,#d50000); color:#fff; }
+.home-ball-blue { background:linear-gradient(135deg,#2979ff,#0d47a1); color:#fff; }
+.home-ball-green { background:linear-gradient(135deg,#00e676,#00c853); color:#fff; }
+.home-ball-sep { font-size:16px; color:var(--text-muted); margin:0 2px; }
+
+.home-trial-row {
+    margin-top:8px; display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    font-size:11px; color:var(--text-muted);
+}
+.home-trial-label { padding:1px 5px; border-radius:3px; background:var(--bg-muted); }
+.home-trial-num { font-weight:600; font-family:var(--font-mono); color:var(--text-secondary); }
+.home-trial-machine { margin-left:6px; opacity:0.7; }
+
+.home-empty-draw {
+    text-align:center; padding:20px 0; color:var(--text-muted); font-size:13px;
+}
+
+.home-card-footer {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 18px; border-top:1px solid var(--border);
+}
+.home-footer-link {
+    font-size:12px; text-decoration:none; transition:color 0.15s;
+}
+.home-footer-search { color:var(--primary); }
+.home-footer-search:hover { color:var(--primary-hover); }
+.home-footer-detail { color:var(--text-muted); }
+.home-footer-detail:hover { color:var(--text-secondary); }
+
+/* 更新按钮样式（系统页使用） */
+</style>
+
+<!-- 初始倒计时数据（服务端注入，避免前端首次加载显示 --:--:--） -->
+<script>window._cdData = {{ countdown_json|safe }};</script>
+
+<!-- JS -->
+<script>
+// ========== 倒计时管理（后端驱动）- 纯 API 获取，前端不本地计算 ==========
+const ALL_CODES = ['dlt', 'ssq', 'p3', 'p5', '3d', 'qxc', '7lc', 'kl8'];
+let countdownTimer = null;
+let countdownSyncTimer = null;
+
+function formatTime(seconds) {
+    if (seconds <= 0) return '00:00:00';
+    var h = Math.floor(seconds / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    var s = seconds % 60;
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function updateAllTimers(allData) {
+    var anyActive = false;
+    var now = Math.floor(Date.now() / 1000);
+    ALL_CODES.forEach(function(code) {
+        var el = document.getElementById('cd-' + code);
+        var dateEl = document.getElementById('cd-' + code + '-date');
+        if (!el) return;
+        var data = allData[code];
+        if (!data || data.next_draw_ts === undefined) {
+            el.textContent = '--:--:--';
+            el.className = 'countdown-timer';
+            if (dateEl) dateEl.textContent = '--';
+            return;
+        }
+        var secondsLeft = Math.max(0, data.next_draw_ts - now);
+        el.textContent = formatTime(secondsLeft);
+        el.className = 'countdown-timer';
+        if (secondsLeft <= 300 && secondsLeft > 0) {
+            el.classList.add('cd-warning');
+        } else if (secondsLeft > 300) {
+            el.classList.add('cd-upcoming');
+        }
+        if (dateEl) dateEl.textContent = data.next_draw ? data.next_draw.slice(0, 10) : '--';
+        if (secondsLeft > 0) anyActive = true;
+    });
+    var badge = document.getElementById('countdownStatus');
+    if (badge) {
+        if (anyActive) {
+            badge.textContent = '倒计时中';
+            badge.style.background = '#e8f5e9';
+            badge.style.color = '#2e7d32';
+        } else {
+            badge.textContent = '等待开奖';
+            badge.style.background = '';
+            badge.style.color = 'var(--text-muted)';
+        }
+    }
+}
+
+async function syncCountdown() {
+    try {
+        var resp = await fetch('/api/countdown');
+        var result = await resp.json();
+        if (result.status === 'success' && result.data) {
+            window._cdData = result.data;
+            updateAllTimers(result.data);
+        }
+    } catch(e) {
+        console.log('倒计时同步失败', e);
+    }
+}
+
+function startCountdown() {
+    // 立即使用服务端注入的数据渲染
+    if (window._cdData) {
+        updateAllTimers(window._cdData);
+    }
+    syncCountdown();
+    if (countdownSyncTimer) clearInterval(countdownSyncTimer);
+    countdownSyncTimer = setInterval(syncCountdown, 5000);
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(function() {
+        if (!window._cdData) return;
+        var now = Math.floor(Date.now() / 1000);
+        ALL_CODES.forEach(function(code) {
+            var el = document.getElementById('cd-' + code);
+            var dateEl = document.getElementById('cd-' + code + '-date');
+            if (!el || !window._cdData[code]) return;
+            var data = window._cdData[code];
+            var secondsLeft = Math.max(0, data.next_draw_ts - now);
+            el.textContent = formatTime(secondsLeft);
+            el.className = 'countdown-timer';
+            if (secondsLeft <= 300 && secondsLeft > 0) el.classList.add('cd-warning');
+            else if (secondsLeft > 300) el.classList.add('cd-upcoming');
+            if (dateEl) dateEl.textContent = data.next_draw ? data.next_draw.slice(0, 10) : '--';
+        });
+    }, 1000);
+}
+
+// ========== 轮训机制（开奖后自动检查） ==========
+let pollingTimer = null;
+let pollingRetryCount = 0;
+const POLLING_INTERVAL = 60000; // 60秒轮询
+const POLLING_MAX_RETRIES = 30; // 最多重试30次
+
+function showPollingBar(text, isError) {
+    var bar = document.getElementById('pollingBar');
+    var textEl = document.getElementById('pollingText');
+    if (bar && textEl) {
+        bar.style.display = 'flex';
+        bar.className = 'polling-bar' + (isError ? ' polling-error' : '');
+        textEl.textContent = text;
+    }
+}
+
+function hidePollingBar() {
+    var bar = document.getElementById('pollingBar');
+    if (bar) bar.style.display = 'none';
+}
+
+async function checkDataUpdate() {
+    try {
+        showPollingBar('正在检查最新数据...', false);
+        var resp = await fetch('/api/update/manual-cooldown');
+        var data = await resp.json();
+        if (data.status === 'success' && data.cooldown <= 0) {
+            // 可以更新 → 执行一次拉取
+            var updResp = await fetch('/api/update/manual', { method: 'POST' });
+            var updData = await updResp.json();
+            if (updData.status === 'success') {
+                showPollingBar('已经是最新数据!', false);
+                pollingRetryCount = 0;
+                setTimeout(function() { hidePollingBar(); }, 3000);
+                // 数据已更新，停止轮训
+                stopPolling();
+                // 刷新页面显示最新数据
+                setTimeout(function() { location.reload(); }, 2000);
+            } else {
+                pollingRetryCount++;
+                if (pollingRetryCount >= POLLING_MAX_RETRIES) {
+                    showPollingBar('更新超时，已停止自动检查', true);
+                    stopPolling();
+                } else {
+                    showPollingBar('检查更新中 (' + pollingRetryCount + '/' + POLLING_MAX_RETRIES + ')', false);
+                }
+            }
+        } else {
+            // 未到更新窗口或已更新
+            pollingRetryCount++;
+            if (pollingRetryCount >= POLLING_MAX_RETRIES) {
+                showPollingBar('今日更新已结束', false);
+                stopPolling();
+                setTimeout(function() { hidePollingBar(); }, 5000);
+            } else {
+                showPollingBar('等待开奖窗口 (' + pollingRetryCount + '/' + POLLING_MAX_RETRIES + ')', false);
+            }
+        }
+    } catch(e) {
+        pollingRetryCount++;
+        if (pollingRetryCount >= POLLING_MAX_RETRIES) {
+            showPollingBar('网络错误，已停止自动检查', true);
+            stopPolling();
+        } else {
+            showPollingBar('检查失败，等待重试...', true);
+        }
+    }
+}
+
+function startPolling() {
+    stopPolling();
+    pollingRetryCount = 0;
+    window._pollingActive = true;
+    // 延迟5-8分钟后开始轮训（模拟开奖后的等待期）
+    var initialDelay = 5 * 60 * 1000 + Math.random() * 3 * 60 * 1000;
+    setTimeout(function() {
+        showPollingBar('准备检查最新数据...', false);
+        checkDataUpdate();
+        pollingTimer = setInterval(checkDataUpdate, POLLING_INTERVAL);
+    }, initialDelay);
+}
+
+function stopPolling() {
+    window._pollingActive = false;
+    if (pollingTimer) {
+        clearInterval(pollingTimer);
+        pollingTimer = null;
+    }
+}
+
+// ========== 初始化 ==========
+document.addEventListener('DOMContentLoaded', function() {
+    // 倒计时（后端驱动）
+    startCountdown();
+
+    // 启动条件轮训（根据时间窗口判断）
+    var now = new Date();
+    var hour = now.getHours();
+    // 仅在21:00~23:00之间启动轮训
+    if (hour >= 21 && hour < 23) {
+        startPolling();
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="sep">›</span> <a href="/{{ lottery_code }}">{{ lottery_name }}</a>
+<span class="sep">›</span> <span class="current">高级搜索</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ lottery_name }} <span class="subtitle">高级搜索</span></h1>
+</div>
+
+<!-- 搜索表单 -->
+<div class="search-card">
+    <form method="get" action="/{{ lottery_code }}/advanced">
+        <div class="input-area">
+            <div class="input-section">
+                <div class="input-section-title">
+                    <span class="ist-icon">📝</span> 期号搜索
+                    <span class="ist-hint">支持模糊搜索，如输入"2025"搜索所有2025年期</span>
+                </div>
+                <input type="text" name="draw_number" class="input" style="width:220px;font-family:var(--font-mono)"
+                    placeholder="输入期号" value="{{ draw_number }}">
+            </div>
+            <div class="input-section">
+                <div class="input-section-title">
+                    <span class="ist-icon">📅</span> 日期范围
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <input type="date" name="date_from" class="input" value="{{ date_from }}" placeholder="开始日期">
+                    <span class="filter-sep">—</span>
+                    <input type="date" name="date_to" class="input" value="{{ date_to }}" placeholder="结束日期">
+                </div>
+            </div>
+        </div>
+        <div class="action-row" style="border:none;padding-top:0;">
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary">🔍 搜索</button>
+                <a href="/{{ lottery_code }}/advanced" class="btn btn-outline">✕ 重置</a>
+            </div>
+        </div>
+    </form>
+</div>
+
+{% if results is defined %}
+<div class="result-bar">共找到 <strong>{{ total }}</strong> 条符合的记录</div>
+
+<div class="table-wrap" style="margin-top:12px;">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>期号</th>
+                <th>日期</th>
+                <th>开奖号码</th>
+                <th class="num">投注总额</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if results %}
+            {% for row in results %}
+            <tr>
+                <td><strong style="font-family:var(--font-mono)">{{ row.draw_number }}</strong></td>
+                <td style="font-size:12px;color:var(--text-secondary)">{{ row.draw_date }}</td>
+                <td class="num-cell">
+                    {% if row.numbers is mapping %}
+                        {% if row.numbers.red is defined %}
+                            {% for n in row.numbers.red %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            <span class="ball-sm ball-blue-sm">{{ row.numbers.blue }}</span>
+                        {% elif row.numbers.front is defined %}
+                            {% for n in row.numbers.front %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            {% for n in row.numbers.back %}<span class="ball-sm ball-blue-sm">{{ n }}</span>{% endfor %}
+                        {% elif row.numbers.main is defined %}
+                            {% for n in row.numbers.main %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            <span class="ball-sm" style="background:var(--c-kl8)">{{ row.numbers.special }}</span>
+                        {% endif %}
+                    {% elif row.numbers is sequence %}
+                        {% for n in row.numbers %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                    {% endif %}
+                </td>
+                <td class="num" style="font-size:12px;color:var(--text-secondary)">
+                    {% if row.sale_amount %}{{ "{:,}".format(row.sale_amount) }}{% else %}—{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr><td colspan="4"><div class="empty-state"><p>未找到匹配记录</p></div></td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- 分页 -->
+{% if total > 30 %}
+{% set per_page = 30 %}
+{% set total_pages = ((total / per_page) | round(0, 'ceil')) | int %}
+<div class="pagination">
+    {% set base_url = '?draw_number=' ~ (draw_number or '') ~ '&date_from=' ~ (date_from or '') ~ '&date_to=' ~ (date_to or '') ~ '&page=' %}
+    {% set cp = page %}
+
+    {% if cp > 1 %}
+    <a href="{{ base_url }}1" class="page-link page-nav" title="首页">⟪</a>
+    <a href="{{ base_url }}{{ cp-1 }}" class="page-link page-nav" title="上一页">‹</a>
+    {% endif %}
+
+    {% set start = [cp-2, 1] | max %}
+    {% set end = [start+4, total_pages] | min %}
+    {% set start = [end-4, 1] | max %}
+
+    {% if start > 1 %}
+    <a href="{{ base_url }}1" class="page-link page-num">1</a>
+    {% if start > 2 %}<span class="page-ellipsis">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in range(start, end+1) %}
+    <a href="{{ base_url }}{{ p }}" class="page-link page-num {% if p == cp %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+
+    {% if end < total_pages %}
+    {% if end < total_pages-1 %}<span class="page-ellipsis">…</span>{% endif %}
+    <a href="{{ base_url }}{{ total_pages }}" class="page-link page-num">{{ total_pages }}</a>
+    {% endif %}
+
+    {% if cp < total_pages %}
+    <a href="{{ base_url }}{{ cp+1 }}" class="page-link page-nav" title="下一页">›</a>
+    <a href="{{ base_url }}{{ total_pages }}" class="page-link page-nav" title="末页">»</a>
+    {% endif %}
+
+    <span class="page-info">{{ cp }}/{{ total_pages }}</span>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

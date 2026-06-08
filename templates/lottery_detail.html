@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="sep">›</span> <a href="/{{ lottery_code }}">{{ lottery_name }}</a>
+<span class="sep">›</span> <span class="current">开奖记录</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ lottery_name }} <span class="subtitle">开奖记录</span></h1>
+    <div>
+        <a href="/{{ lottery_code }}/search" class="btn btn-outline btn-sm">🔍 号码查询</a>
+        <a href="/{{ lottery_code }}/stats" class="btn btn-outline btn-sm">📊 统计</a>
+    </div>
+</div>
+
+<!-- 筛选栏 -->
+<div class="filter-bar">
+    <form class="filter-form" method="get" action="/{{ lottery_code }}">
+        <span class="filter-label">日期筛选</span>
+        <input type="date" name="start_date" class="input input-sm" value="{{ start_date }}" placeholder="开始日期">
+        <span class="filter-sep">—</span>
+        <input type="date" name="end_date" class="input input-sm" value="{{ end_date }}" placeholder="结束日期">
+        {% if start_date or end_date %}
+        <input type="hidden" name="page" value="1">
+        {% endif %}
+        <button type="submit" class="btn btn-primary btn-sm">筛选</button>
+        {% if start_date or end_date %}
+        <a href="/{{ lottery_code }}" class="filter-clear">✕ 清除筛选</a>
+        {% endif %}
+    </form>
+</div>
+
+<!-- 表格 -->
+<div class="table-wrap">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:13px;color:var(--text-secondary);">共 <strong>{{ total_records }}</strong> 条开奖记录</span>
+        <a href="/api/{{ lottery_code }}/export?export_type=draws{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}" class="btn btn-sm btn-outline" style="text-decoration:none;" download>📥 导出CSV</a>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>期号</th>
+                <th>日期</th>
+                <th>开奖号码</th>
+                {% if draws and draws[0].trial_numbers %}<th>试机号</th>{% endif %}
+                <th class="num">投注总额</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if draws %}
+            {% for draw in draws %}
+            <tr>
+                <td><strong style="font-family:var(--font-mono)">{{ draw.draw_number }}</strong></td>
+                <td style="font-size:12px;color:var(--text-secondary)">{{ draw.draw_date }}</td>
+                <td class="num-cell">
+                    {% if draw.numbers is mapping %}
+                        {% if draw.numbers.red is defined %}
+                            {% for n in draw.numbers.red %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            {% if draw.numbers.blue is defined %}<span class="ball-sm ball-blue-sm">{{ draw.numbers.blue }}</span>{% endif %}
+                        {% elif draw.numbers.front is defined %}
+                            {% for n in draw.numbers.front %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            {% for n in draw.numbers.back %}<span class="ball-sm ball-blue-sm">{{ n }}</span>{% endfor %}
+                        {% elif draw.numbers.main is defined %}
+                            {% for n in draw.numbers.main %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            <span class="ball-sm" style="background:var(--c-kl8)">{{ draw.numbers.special }}</span>
+                        {% endif %}
+                    {% elif draw.numbers is sequence %}
+                        {% for n in draw.numbers %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                    {% endif %}
+                </td>
+                {% if draw.trial_numbers %}
+                <td style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">
+                    {% for n in draw.trial_numbers %}{{ n }} {% endfor %}
+                    {% if draw.machine_ball %}({{ draw.machine_ball|join(',') }}){% endif %}
+                </td>
+                {% endif %}
+                <td class="num" style="font-size:12px;color:var(--text-secondary)">
+                    {% if draw.sale_amount %}{{ "{:,}".format(draw.sale_amount) }}{% else %}—{% endif %}
+                </td>
+                <td>
+                    {% if draw.prizes %}
+                    <button class="btn btn-sm btn-outline" onclick="togglePrizes('p-{{ draw.id }}')">奖金</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% if draw.prizes %}
+            <tr id="p-{{ draw.id }}" style="display:none;">
+                <td colspan="{% if draws[0].trial_numbers %}6{% else %}5{% endif %}" style="padding:0;background:#fafbfd;">
+                    <div class="prizes-table-wrap">
+                        <table class="prizes-table">
+                            <thead><tr><th>奖级</th><th>中奖注数</th><th>单注奖金</th></tr></thead>
+                            <tbody>
+                                {% for prize in draw.prizes %}
+                                <tr>
+                                    <td>{{ prize.name or prize.level or '' }}</td>
+                                    <td>{{ prize.count or prize.winning_count or prize.notes or '—' }}</td>
+                                    <td>{{ prize.amount or prize.prize_amount or prize.money or '—' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            <tr>
+                <td colspan="{% if draws and draws[0].trial_numbers %}6{% else %}5{% endif %}">
+                    <div class="empty-state"><p>暂无开奖数据</p></div>
+                </td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<!-- 分页 -->
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% set base_url = '/' ~ lottery_code ~ '?page=' %}
+    {% set extra = '' %}
+    {% if start_date %}{% set extra = extra ~ '&start_date=' ~ start_date %}{% endif %}
+    {% if end_date %}{% set extra = extra ~ '&end_date=' ~ end_date %}{% endif %}
+
+    {% if page > 1 %}
+    <a href="{{ base_url }}1{{ extra }}" class="page-link page-nav" title="首页">⟪</a>
+    <a href="{{ base_url }}{{ page-1 }}{{ extra }}" class="page-link page-nav" title="上一页">‹</a>
+    {% endif %}
+
+    {% set start = [page-2, 1] | max %}
+    {% set end = [start+4, total_pages] | min %}
+    {% set start = [end-4, 1] | max %}
+
+    {% if start > 1 %}
+    <a href="{{ base_url }}1{{ extra }}" class="page-link page-num">1</a>
+    {% if start > 2 %}<span class="page-ellipsis">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in range(start, end+1) %}
+    <a href="{{ base_url }}{{ p }}{{ extra }}" class="page-link page-num {% if p == page %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+
+    {% if end < total_pages %}
+    {% if end < total_pages-1 %}<span class="page-ellipsis">…</span>{% endif %}
+    <a href="{{ base_url }}{{ total_pages }}{{ extra }}" class="page-link page-num">{{ total_pages }}</a>
+    {% endif %}
+
+    {% if page < total_pages %}
+    <a href="{{ base_url }}{{ page+1 }}{{ extra }}" class="page-link page-nav" title="下一页">›</a>
+    <a href="{{ base_url }}{{ total_pages }}{{ extra }}" class="page-link page-nav" title="末页">»</a>
+    {% endif %}
+
+    <span class="page-info">{{ page }}/{{ total_pages }}</span>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePrizes(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+</script>
+{% endblock %}

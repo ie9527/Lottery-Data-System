@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="sep">›</span> <a href="/{{ lottery_code }}">{{ lottery_name }}</a>
+<span class="sep">›</span> <span class="current">未开奖号码</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ lottery_name }} <span class="subtitle">开奖数据可视化</span></h1>
+</div>
+
+<!-- 时间范围筛选（明确标识为筛选条件） -->
+<div class="period-dim-bar" style="margin-bottom:14px;">
+    <div class="rc-row" style="gap:4px;flex-wrap:wrap;">
+        <span class="rc-label" style="min-width:60px;">
+            <span style="font-size:13px;">🔍</span> 时间范围
+        </span>
+        {% for p in period_stats.periods %}
+        <a href="?period={{ p.key }}&page=1" class="period-dim-item {% if period == p.key %}active{% endif %}"
+           title="筛选{{ p.label }}: {{ p.count }} 期">
+            <span class="dim-label">{{ p.label }}</span>
+            <span class="dim-count">{{ p.count }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    <div style="margin-top:4px;font-size:11px;color:var(--text-muted);padding-left:70px;">
+        <span>选择时间范围过滤下方开奖数据，当前维度: <strong>{{ period_data.period_label }}</strong></span>
+    </div>
+</div>
+
+<!-- 未开奖号码概览（仅数字彩/快乐八） -->
+{% if unused_data %}
+<div class="stat-grid" style="margin-bottom:14px;">
+    {% if unused_data.stats %}
+    {% set s = unused_data.stats %}
+    <div class="stat-card">
+        <div class="stat-icon">📐</div>
+        <div class="stat-value" style="font-size:16px;">{{ s.total_combs }}</div>
+        <div class="stat-label">理论组合数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">✅</div>
+        <div class="stat-value" style="font-size:16px;">{{ s.opened_combs }}</div>
+        <div class="stat-label">已开出</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">❌</div>
+        <div class="stat-value" style="font-size:16px;color:var(--c-danger)">{{ s.unused_combs }}</div>
+        <div class="stat-label">未开出</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-value" style="font-size:16px;">{{ (s.coverage or 0)|round(4) }}%</div>
+        <div class="stat-label">覆盖率</div>
+    </div>
+    {% elif unused_data.unused_combs is defined %}
+    <div class="stat-card">
+        <div class="stat-icon">📐</div>
+        <div class="stat-value" style="font-size:16px;">{{ unused_data.total_combs }}</div>
+        <div class="stat-label">理论组合数</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">✅</div>
+        <div class="stat-value" style="font-size:16px;">{{ unused_data.opened_combs }}</div>
+        <div class="stat-label">已开出</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">❌</div>
+        <div class="stat-value" style="font-size:16px;color:var(--c-danger)">{{ unused_data.unused_combs }}</div>
+        <div class="stat-label">未开出</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-value" style="font-size:16px;">{{ (unused_data.coverage or 0)|round(4) }}%</div>
+        <div class="stat-label">覆盖率</div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- 号码历史查询（始终显示） -->
+<div class="query-section" style="margin-bottom:14px;">
+    <div class="rc-row">
+        <span class="rc-label">号码历史查询</span>
+        <div class="filter-date" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <input type="text" id="historyNum" class="query-input" placeholder="输入号码，如 07" maxlength="5" style="width:100px;">
+            {% if lottery_code in ('ssq','dlt','7lc','kl8') %}
+            <select id="historyNumType" class="input input-sm">
+                <option value="single">全部</option>
+                <option value="red">红号/前区</option>
+                <option value="blue">蓝号/后区</option>
+            </select>
+            {% endif %}
+            <button class="btn btn-primary btn-sm" onclick="checkNumberHistory()">查询</button>
+        </div>
+    </div>
+    <div id="historyResult" style="display:none;margin-top:10px;"></div>
+</div>
+
+<!-- 范围查询 + 统计数据 -->
+<div class="filter-bar" style="margin-bottom:14px;">
+    <div class="filter-form" style="gap:8px;">
+        <span class="filter-label" style="min-width:50px;">筛选</span>
+
+        <!-- 日期范围 -->
+        <form class="filter-date" method="get" action="" style="display:inline-flex;align-items:center;gap:6px;">
+            <input type="hidden" name="period" value="{{ period }}">
+            <input type="date" name="date_from" value="{{ date_from or '' }}" placeholder="起始日期" style="width:130px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;">
+            <span style="color:var(--text-muted);font-size:12px;">~</span>
+            <input type="date" name="date_to" value="{{ date_to or '' }}" placeholder="结束日期" style="width:130px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;">
+            <button type="submit" class="btn btn-sm btn-outline">日期筛选</button>
+        </form>
+
+        <span style="color:var(--text-muted);font-size:12px;">|</span>
+
+        <!-- 期号范围 -->
+        <form class="filter-date" method="get" action="" style="display:inline-flex;align-items:center;gap:6px;">
+            <input type="hidden" name="period" value="{{ period }}">
+            <input type="text" name="draw_from" value="{{ draw_from or '' }}" placeholder="起始期号" style="width:90px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-family:var(--font-mono);">
+            <span style="color:var(--text-muted);font-size:12px;">~</span>
+            <input type="text" name="draw_to" value="{{ draw_to or '' }}" placeholder="结束期号" style="width:90px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;font-family:var(--font-mono);">
+            <button type="submit" class="btn btn-sm btn-outline">期号筛选</button>
+        </form>
+
+        {% if date_from or date_to or draw_from or draw_to %}
+        <a href="?period={{ period }}" class="filter-clear" style="font-size:12px;">清除筛选</a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 数据统计摘要 -->
+<div class="rc-row" style="margin-bottom:10px;font-size:13px;color:var(--text-secondary);gap:16px;">
+    <span>当前维度: <strong>{{ period_data.period_label }}</strong></span>
+    <span>共 <strong>{{ period_data.total }}</strong> 条记录</span>
+    {% if period_stats.first_date %}
+    <span>数据范围: {{ period_stats.first_date }} ~ {{ period_stats.last_date }}</span>
+    {% endif %}
+    {% if period_data.total_pages > 1 %}
+    <span>第 {{ period_data.page }}/{{ period_data.total_pages }} 页</span>
+    {% endif %}
+    <a href="/api/{{ lottery_code }}/export?export_type=period&period={{ period }}{% if date_from %}&date_from={{ date_from }}{% endif %}{% if date_to %}&date_to={{ date_to }}{% endif %}{% if draw_from %}&draw_from={{ draw_from }}{% endif %}{% if draw_to %}&draw_to={{ draw_to }}{% endif %}" class="btn btn-sm btn-outline" style="text-decoration:none;margin-left:auto;" download>📥 导出CSV</a>
+</div>
+
+<!-- 开奖数据表格 -->
+{% if period_data.draws %}
+<div class="table-wrap">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>期号</th>
+                <th>日期</th>
+                <th>开奖号码</th>
+                {% if period_data.draws[0].trial_numbers %}<th>试机号</th>{% endif %}
+                <th class="num">投注总额</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for draw in period_data.draws %}
+            <tr>
+                <td><strong style="font-family:var(--font-mono)">{{ draw.draw_number }}</strong></td>
+                <td style="font-size:12px;color:var(--text-secondary)">{{ draw.draw_date }}</td>
+                <td class="num-cell">
+                    {% if draw.numbers is mapping %}
+                        {% if draw.numbers.red is defined %}
+                            {% for n in draw.numbers.red %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            {% if draw.numbers.blue is defined %}<span class="ball-sm ball-blue-sm">{{ draw.numbers.blue }}</span>{% endif %}
+                        {% elif draw.numbers.front is defined %}
+                            {% for n in draw.numbers.front %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            {% for n in draw.numbers.back %}<span class="ball-sm ball-blue-sm">{{ n }}</span>{% endfor %}
+                        {% elif draw.numbers.main is defined %}
+                            {% for n in draw.numbers.main %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                            <span class="ball-sep-sm">+</span>
+                            <span class="ball-sm" style="background:var(--c-kl8)">{{ draw.numbers.special }}</span>
+                        {% endif %}
+                    {% elif draw.numbers is sequence %}
+                        {% for n in draw.numbers %}<span class="ball-sm ball-red-sm">{{ n }}</span>{% endfor %}
+                    {% endif %}
+                </td>
+                {% if draw.trial_numbers %}
+                <td style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">
+                    {% for n in draw.trial_numbers %}{{ n }} {% endfor %}
+                    {% if draw.machine_ball %}({{ draw.machine_ball|join(',') }}){% endif %}
+                </td>
+                {% endif %}
+                <td class="num" style="font-size:12px;color:var(--text-secondary)">
+                    {% if draw.sale_amount %}{{ "{:,}".format(draw.sale_amount) }}{% else %}—{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- 分页 -->
+{% set qs = 'period=' ~ period %}
+{% if date_from %}{% set qs = qs ~ '&date_from=' ~ date_from %}{% endif %}
+{% if date_to %}{% set qs = qs ~ '&date_to=' ~ date_to %}{% endif %}
+{% if draw_from %}{% set qs = qs ~ '&draw_from=' ~ draw_from %}{% endif %}
+{% if draw_to %}{% set qs = qs ~ '&draw_to=' ~ draw_to %}{% endif %}
+{% set page_url_prefix = '?' ~ qs ~ '&page=' %}
+{% include '_pagination.html' %}
+{% else %}
+<div class="empty-state"><p>该时间段暂无数据</p></div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function checkNumberHistory() {
+    var num = document.getElementById('historyNum').value.trim();
+    var resultDiv = document.getElementById('historyResult');
+    if (!num) {
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="msg-warn">请输入要查询的号码</div>';
+        return;
+    }
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div class="msg-info">查询中...</div>';
+
+    var numType = document.getElementById('historyNumType');
+    var nt = numType ? numType.value : 'single';
+
+    var url = '/api/{{ lottery_code }}/number-history?q=' + encodeURIComponent(num) + '&num_type=' + nt;
+    fetch(url).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.status !== 'success' || !d.data) {
+            resultDiv.innerHTML = '<div class="msg-warn">查询失败: ' + (d.message || '未知错误') + '</div>';
+            return;
+        }
+        var html = '<table class="period-table"><thead><tr><th>时间段</th><th>是否开出</th><th>出现次数</th></tr></thead><tbody>';
+        d.data.periods.forEach(function(p) {
+            var badge = p.appeared ? '<span class="tag-direct">已开出</span>' : '<span class="tag-group">未开出</span>';
+            html += '<tr><td>' + p.label + '</td><td>' + badge + '</td><td>' + p.count + ' 次</td></tr>';
+        });
+        html += '</tbody></table>';
+        html += '<div style="margin-top:6px;font-size:12px;color:var(--text-muted)">总开奖期数: ' + d.data.total_draws + ' 期</div>';
+        resultDiv.innerHTML = html;
+    }).catch(function(e) {
+        resultDiv.innerHTML = '<div class="msg-warn">请求失败: ' + e.message + '</div>';
+    });
+}
+</script>
+<style>
+.period-dim-bar { background:var(--bg-card); border-radius:var(--radius); padding:10px 14px; border:1px solid var(--border); }
+.period-dim-item {
+    display:inline-flex; flex-direction:column; align-items:center;
+    padding:6px 14px; border-radius:var(--radius-sm);
+    text-decoration:none; color:var(--text-secondary);
+    border:1px solid transparent; transition:all var(--transition);
+    cursor:pointer; min-width:64px;
+}
+.period-dim-item:hover { background:var(--bg-hover); border-color:var(--border); }
+.period-dim-item.active { background:var(--primary-light); border-color:var(--primary); color:var(--primary); }
+.period-dim-item .dim-label { font-size:12px; font-weight:600; }
+.period-dim-item .dim-count { font-size:18px; font-weight:700; line-height:1.4; }
+.period-dim-item.active .dim-count { color:var(--primary); }
+.period-table { width:100%; border-collapse:collapse; font-size:14px; }
+.period-table th { background:var(--bg-muted); padding:8px 12px; text-align:left; border-bottom:2px solid var(--border); font-weight:600; }
+.period-table td { padding:8px 12px; border-bottom:1px solid var(--border); }
+.period-table tr:hover td { background:var(--bg-hover); }
+.msg-warn { padding:8px 12px; background:#fff3e0; color:#e65100; border-radius:var(--radius-sm); font-size:14px; }
+.msg-info { padding:8px 12px; background:#e3f2fd; color:#1565c0; border-radius:var(--radius-sm); font-size:14px; }
+</style>
+{% endblock %}

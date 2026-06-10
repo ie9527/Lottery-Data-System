@@ -324,3 +324,56 @@ def ensure_no_duplicates(lottery_code, draw_number):
     exists = cursor.fetchone() is not None
     conn.close()
     return not exists
+
+
+# ============================================================
+# 期号模糊匹配（支持忽略年份前缀）
+# ============================================================
+
+DRAW_NUMBER_YEARS = 5  # 最近5年的期号
+
+def match_draw_number(lottery_code, draw_number, cursor=None):
+    """模糊匹配期号，支持忽略年份前缀
+
+    用户输入 "318" 可匹配 "2025318"、"2024318" 等。
+    优先精确匹配，再按后缀模糊匹配（取最新的）。
+
+    Args:
+        lottery_code: 彩种代码
+        draw_number: 用户输入的期号（可能短于完整期号）
+        cursor: 可选的数据库游标（如为 None，内部创建并关闭）
+
+    Returns:
+        dict | None: 匹配到的开奖记录，或 None
+    """
+    own_cursor = False
+    if cursor is None:
+        conn = get_connection()
+        cursor = conn.cursor()
+        own_cursor = True
+
+    row = None
+    raw = str(draw_number).strip()
+
+    # 1. 精确匹配
+    cursor.execute(
+        "SELECT * FROM lottery_draws WHERE lottery_code=? AND draw_number=?",
+        (lottery_code, raw)
+    )
+    row = cursor.fetchone()
+
+    # 2. 后缀模糊匹配（用户只输了后半段，如 "318" 匹配 "2025318"）
+    if not row and raw.isdigit():
+        # 使用 LIKE %后缀 匹配，取最新一期
+        cursor.execute(
+            "SELECT * FROM lottery_draws WHERE lottery_code=? AND draw_number LIKE ? ORDER BY LENGTH(draw_number) ASC, draw_number DESC LIMIT 1",
+            (lottery_code, f"%{raw}")
+        )
+        row = cursor.fetchone()
+
+    result = dict(row) if row else None
+
+    if own_cursor:
+        conn.close()
+
+    return result

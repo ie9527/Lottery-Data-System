@@ -1,0 +1,537 @@
+{% extends "base.html" %}
+{% block title %}AI 对话 - 彩票数据系统{% endblock %}
+
+{% block breadcrumb %}
+<span class="sep">›</span> <span class="current">AI 对话</span>
+{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <div class="chat-header">
+        <div class="chat-header-title">
+            <span class="chat-header-icon">🤖</span>
+            <span>AI 数据分析助手</span>
+        </div>
+        <div class="chat-header-actions">
+            <button class="chat-btn chat-btn-new" id="newChatBtn" title="新开对话">
+                <span class="btn-icon">✚</span>
+                <span>新对话</span>
+            </button>
+            <button class="chat-btn chat-btn-export" id="exportChatBtn" title="导出对话记录">
+                <span class="btn-icon">↓</span>
+                <span>导出</span>
+            </button>
+            <div class="chat-header-status">
+                <span class="chat-status-dot {% if api_key_configured %}online{% else %}offline{% endif %}"></span>
+                <span id="chatStatusText">{{ '已就绪' if api_key_configured else '未配置 API Key' }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+        <div class="chat-msg-welcome" id="chatWelcome">
+            <div class="welcome-icon">🤖</div>
+            <div class="welcome-title">你好！我是彩票数据分析助手</div>
+            <div class="welcome-desc">我可以帮你查询开奖号码、分析号码趋势、统计历史数据。试试下面的问题：</div>
+            <div class="welcome-hints">
+                <div class="hint-item" data-hint="3D今天开奖号码是什么？">📊 3D今天开奖号码</div>
+                <div class="hint-item" data-hint="帮我看看豹子号出现过多少次">🔢 查询豹子号统计</div>
+                <div class="hint-item" data-hint="分析一下双色球热号和冷号">🔥 双色球热冷号分析</div>
+                <div class="hint-item" data-hint="福彩3D 888历史上开出过多少次">🎯 查询号码出现次数</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-input-area">
+        <div class="chat-input-options">
+            <label class="thinking-toggle active" id="thinkingToggle">
+                <input type="checkbox" id="deepThinking" checked>
+                <span class="toggle-indicator"></span>
+                <span class="toggle-label">深度思考</span>
+            </label>
+        </div>
+        <div class="chat-input-wrapper">
+            <textarea class="chat-input" id="chatInput" placeholder="输入你的问题..." rows="1"
+                      {% if not api_key_configured %}disabled{% endif %}></textarea>
+            <button class="chat-send-btn" id="chatSendBtn" {% if not api_key_configured %}disabled{% endif %}>
+                <span class="send-icon">➤</span>
+            </button>
+        </div>
+        <div class="chat-input-hint">Enter 发送 · Shift+Enter 换行</div>
+    </div>
+</div>
+
+<!-- Token 用量显示栏 -->
+<div class="tokens-bar" id="tokensBar" style="display:none;">
+    <div class="tokens-bar-inner">
+        <span class="tokens-label">大约估计</span>
+        <span class="tokens-item"><span class="tokens-icon">📊</span> 总计: <strong id="tokensTotal">0</strong></span>
+        <span class="tokens-sep">|</span>
+        <span class="tokens-item"><span class="tokens-icon">📥</span> 命中缓存: <strong id="tokensCacheHit">0</strong></span>
+        <span class="tokens-sep">|</span>
+        <span class="tokens-item"><span class="tokens-icon">📤</span> 未命中缓存: <strong id="tokensCacheMiss">0</strong></span>
+        <span class="tokens-sep">|</span>
+        <span class="tokens-item"><span class="tokens-icon">📝</span> 输出: <strong id="tokensCompletion">0</strong></span>
+        <span class="tokens-sep">|</span>
+        <span class="tokens-item"><span class="tokens-icon">🔄</span> 请求: <strong id="tokensRequests">0</strong></span>
+        <span class="tokens-sep">|</span>
+        <span class="tokens-item"><span class="tokens-icon">💵</span> 约 <strong id="tokensCost">0</strong> 元</span>
+    </div>
+</div>
+
+<!-- 余额显示 -->
+<div class="balance-bar" id="balanceBar" style="display:none;">
+    <div class="balance-bar-inner">
+        <span class="balance-label">💰 余额</span>
+        <span class="balance-item" id="balanceTotal">-</span>
+        <span class="balance-status" id="balanceStatus"></span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/markdown-it.min.js"></script>
+<script>
+(function() {
+    'use strict';
+
+    // 初始化 markdown-it 解析器
+    var md = window.markdownit({
+        html: false,
+        breaks: true,
+        linkify: true,
+        typographer: false,
+    });
+
+    const STORAGE_KEY = 'lottery_chat_history';
+    const messagesEl = document.getElementById('chatMessages');
+    const inputEl = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('chatSendBtn');
+    const statusText = document.getElementById('chatStatusText');
+    const welcomeEl = document.getElementById('chatWelcome');
+
+    let isProcessing = false;
+    let sessionId = localStorage.getItem('chat_session_id') || '';
+    let requestCount = 0;  // 请求计数器
+
+    function esc(text) {
+        if (!text) return '';
+        const d = document.createElement('div');
+        d.textContent = text;
+        return d.innerHTML;
+    }
+    function scrollBottom() {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+    function genSessionId() {
+        return 'chat_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 6);
+    }
+    function now() { return new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}); }
+
+    // ---------- localStorage ----------
+    function loadHistory() {
+        try { const r = localStorage.getItem(STORAGE_KEY); return r ? JSON.parse(r) : null; } catch { return null; }
+    }
+    function saveHistory(messages, sid) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ session_id: sid, messages: messages })); } catch {}
+    }
+    function clearHistory() {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem('chat_session_id');
+    }
+
+    // ---------- 消息渲染（无头像模式） ----------
+    function addMsg(role, html, ts) {
+        if (welcomeEl) welcomeEl.style.display = 'none';
+        const div = document.createElement('div');
+        div.className = 'chat-msg ' + (role === 'user' ? 'msg-user' : 'msg-bot');
+        div.innerHTML = '<div class="msg-bubble msg-bubble-' + (role === 'user' ? 'user' : 'bot') + '">' + html + '<div class="msg-time">' + (ts || now()) + '</div></div>';
+        messagesEl.appendChild(div);
+        scrollBottom();
+        return div;
+    }
+
+    // ---------- 流式渲染（无头像） ----------
+    function streamBubble() {
+        let last = messagesEl.querySelector('.chat-msg.msg-bot:last-child');
+        if (!last || last.dataset.streaming !== 'true') {
+            const div = document.createElement('div');
+            div.className = 'chat-msg msg-bot';
+            div.dataset.streaming = 'true';
+            div.innerHTML = '<div class="msg-bubble msg-bubble-bot"><span class="stream-text"></span><div class="msg-time">' + now() + '</div></div>';
+            messagesEl.appendChild(div);
+            last = div;
+        }
+        return last.querySelector('.msg-bubble');
+    }
+    function streamAppend(text) {
+        const b = streamBubble();
+        let s = b.querySelector('.stream-text');
+        if (!s) { s = document.createElement('span'); s.className = 'stream-text'; b.appendChild(s); }
+        s.textContent += text;
+        scrollBottom();
+    }
+    function streamFinalize() {
+        const b = streamBubble();
+        const s = b.querySelector('.stream-text');
+        if (!s) return;
+        const txt = s.textContent;
+        s.remove();
+        // 插入到时间戳前面
+        const time = b.querySelector('.msg-time');
+        const html = fmtMarkdown(txt);
+        if (time) {
+            time.insertAdjacentHTML('beforebegin', html);
+        } else {
+            b.insertAdjacentHTML('afterbegin', html);
+        }
+        const m = b.closest('.chat-msg');
+        if (m) m.dataset.streaming = 'false';
+        scrollBottom();
+    }
+
+    // 思考块
+    function reasoningAdd(text) {
+        const botMsg = messagesEl.querySelector('.msg-bot:last-child');
+        if (!botMsg) return;
+        const b = botMsg.querySelector('.msg-bubble');
+        if (!b) return;
+        let block = b.querySelector('.reasoning-block');
+        if (!block) {
+            block = document.createElement('div');
+            block.className = 'reasoning-block';
+            block.innerHTML = '<div class="reasoning-header" onclick="this.parentElement.classList.toggle(\'collapsed\')"><span class="reasoning-toggle">▾</span><span class="reasoning-label">思考过程</span><span class="reasoning-dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div><div class="reasoning-content"></div>';
+            const time = b.querySelector('.msg-time');
+            if (time) b.insertBefore(block, time);
+            else b.appendChild(block);
+        }
+        const rc = block.querySelector('.reasoning-content');
+        if (rc) rc.textContent += text;
+        scrollBottom();
+    }
+    function reasoningHideDots() {
+        document.querySelectorAll('.reasoning-dots').forEach(function(d) { d.style.display = 'none'; });
+    }
+
+    // 工具调用（可折叠）
+    function toolAdd(name, args, result) {
+        const cid = 'toolBox';
+        let c = document.getElementById(cid);
+        if (!c) {
+            c = document.createElement('div'); c.id = cid; c.className = 'tool-calls-container';
+            const lb = messagesEl.querySelector('.msg-bot:last-child');
+            if (lb) lb.parentNode.insertBefore(c, lb.nextSibling); else messagesEl.appendChild(c);
+        }
+        const argsStr = JSON.stringify(args || {});
+        const resultStr = typeof result === 'string' ? result : JSON.stringify(result || '');
+        const item = document.createElement('div');
+        item.className = 'tool-call-item';
+        item.innerHTML = '<div class="tool-call-header">'
+            + '<span class="tool-call-icon">⚡</span>'
+            + '<span class="tool-call-name">' + esc(name) + '</span>'
+            + '<span class="tool-call-status running">查询中...</span>'
+            + '<span class="tool-call-toggle">▾</span>'
+            + '</div>'
+            + '<div class="tool-call-detail" style="display:none;">'
+            + '<div class="tool-call-section"><span class="tool-call-label">参数:</span><code class="tool-call-code">' + esc(argsStr) + '</code></div>'
+            + '<div class="tool-call-section"><span class="tool-call-label">结果:</span><pre class="tool-call-pre">' + esc(resultStr) + '</pre></div>'
+            + '</div>';
+        // 点击切换展开/收缩
+        item.querySelector('.tool-call-header').addEventListener('click', function(e) {
+            var detail = item.querySelector('.tool-call-detail');
+            var toggle = item.querySelector('.tool-call-toggle');
+            var isOpen = detail.style.display !== 'none';
+            detail.style.display = isOpen ? 'none' : 'block';
+            toggle.textContent = isOpen ? '▾' : '▴';
+        });
+        c.appendChild(item);
+        scrollBottom();
+        return item;
+    }
+    function toolUpdate(item, status, summary) {
+        const el = item.querySelector('.tool-call-status');
+        if (!el) return;
+        el.className = 'tool-call-status ' + status;
+        el.textContent = status === 'done' ? '✓ ' + (summary || '完成') : '✗ ' + (summary || '失败');
+        scrollBottom();
+    }
+    function toolAddResult(item, result) {
+        var detail = item.querySelector('.tool-call-detail');
+        if (!detail) return;
+        var pre = detail.querySelector('.tool-call-pre');
+        if (pre) {
+            var resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+            pre.textContent = resultStr;
+        }
+    }
+
+    // 用量 - 更新底部 Tokens 栏（含费用估算）
+    function usageShow(u) {
+        const bar = document.getElementById('tokensBar');
+        if (!bar) return;
+        bar.style.display = '';
+        requestCount++;
+        document.getElementById('tokensTotal').textContent = u.total_tokens || 0;
+        document.getElementById('tokensCacheHit').textContent = u.prompt_cache_hit_tokens || 0;
+        document.getElementById('tokensCacheMiss').textContent = u.prompt_cache_miss_tokens || 0;
+        document.getElementById('tokensCompletion').textContent = u.completion_tokens || 0;
+        document.getElementById('tokensRequests').textContent = requestCount;
+        // 费用估算（元）
+        var hit = u.prompt_cache_hit_tokens || 0;
+        var miss = u.prompt_cache_miss_tokens || 0;
+        var out = u.completion_tokens || 0;
+        var cost = (hit / 1000000) * 0.02 + (miss / 1000000) * 1.0 + (out / 1000000) * 2.0;
+        document.getElementById('tokensCost').textContent = cost.toFixed(6);
+    }
+
+    // ---------- 余额查询 ----------
+    async function fetchBalance() {
+        const bar = document.getElementById('balanceBar');
+        if (!bar) return;
+        try {
+            const resp = await fetch('/api/chat/balance');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.status === 'success' && data.data && !data.data.error) {
+                bar.style.display = '';
+                const balance = data.data;
+                const info = balance.balance_infos && balance.balance_infos[0];
+                if (info) {
+                    document.getElementById('balanceTotal').textContent = '¥' + (info.total_balance || info.granted_balance || '0.00');
+                    const statusEl = document.getElementById('balanceStatus');
+                    if (balance.is_available) {
+                        statusEl.innerHTML = ' <span style="color:#2e7d32;font-size:10px;">● 正常</span>';
+                    } else {
+                        statusEl.innerHTML = ' <span style="color:#e53935;font-size:10px;">● 异常</span>';
+                    }
+                }
+            }
+        } catch (e) {
+            // 静默处理，不阻塞页面
+        }
+    }
+
+    // 加载
+    function loadingShow() {
+        const div = document.createElement('div');
+        div.className = 'chat-msg msg-bot'; div.id = 'chatLoading';
+        div.innerHTML = '<div class="msg-bubble msg-bubble-bot"><div class="chat-loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>';
+        messagesEl.appendChild(div);
+        scrollBottom();
+    }
+    function loadingHide() { const el = document.getElementById('chatLoading'); if (el) el.remove(); }
+
+    // ---------- Markdown 解析（markdown-it） ----------
+    function fmtMarkdown(text) {
+        if (!text) return '';
+        // 用 markdown-it 渲染，输出安全 HTML
+        return md.render(text);
+    }
+
+    // ---------- 发送消息 ----------
+    async function sendMessage() {
+        var text = inputEl.value.trim();
+        if (!text || isProcessing) return;
+
+        if (!sessionId) { sessionId = genSessionId(); localStorage.setItem('chat_session_id', sessionId); }
+        inputEl.value = ''; inputEl.style.height = 'auto';
+
+        addMsg('user', esc(text));
+        loadingShow();
+        isProcessing = true; sendBtn.disabled = true;
+        statusText.textContent = '思考中...';
+
+        var currentToolItem = null;
+        var finalText = '';
+        var streaming = false;
+        var thinking = document.getElementById('deepThinking') ? document.getElementById('deepThinking').checked : true;
+
+        try {
+            var resp = await fetch('/api/chat/stream', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: text, session_id: sessionId, thinking: thinking})
+            });
+            if (!resp.ok) {
+                loadingHide();
+                addMsg('bot', '<div class="chat-error">✗ 服务器返回 ' + resp.status + '</div>');
+                statusText.textContent = '请求失败';
+                isProcessing = false; sendBtn.disabled = false;
+                return;
+            }
+            loadingHide();
+
+            var reader = resp.body.getReader();
+            var decoder = new TextDecoder();
+            var buf = '';
+
+            while (true) {
+                var readResult = await reader.read();
+                if (readResult.done) break;
+                buf += decoder.decode(readResult.value, {stream: true});
+                var lines = buf.split('\n');
+                buf = lines.pop() || '';
+                for (var i = 0; i < lines.length; i++) {
+                    var t = lines[i].trim();
+                    if (!t || !t.startsWith('data: ')) continue;
+                    var payload = t.slice(6);
+                    if (payload === '[DONE]') continue;
+                    try { onEvent(JSON.parse(payload)); } catch (e) {}
+                }
+            }
+            if (buf.trim().startsWith('data: ')) {
+                var p = buf.trim().slice(6);
+                if (p !== '[DONE]') { try { onEvent(JSON.parse(p)); } catch (e) {} }
+            }
+
+            reasoningHideDots();
+            if (streaming) { streamFinalize(); streaming = false; }
+            statusText.textContent = '响应完成';
+            saveConv(text, finalText);
+
+        } catch (err) {
+            loadingHide();
+            addMsg('bot', '<div class="chat-error">✗ 网络错误: ' + esc(err.message) + '</div>');
+            statusText.textContent = '网络错误';
+        }
+        isProcessing = false; sendBtn.disabled = false;
+        inputEl.focus();
+
+        function onEvent(evt) {
+            switch (evt.type) {
+                case 'reasoning': reasoningAdd(evt.content); statusText.textContent = '思考中...'; break;
+                case 'tool_calls_start': statusText.textContent = '正在查询 ' + evt.content + ' 项数据...'; break;
+                case 'tool_call': currentToolItem = toolAdd(evt.content.name, evt.content.args); statusText.textContent = '查询中: ' + evt.content.name; break;
+                case 'tool_call_result': if (currentToolItem) { toolUpdate(currentToolItem, 'done', evt.content.summary); if (evt.content.result) toolAddResult(currentToolItem, evt.content.result); currentToolItem = null; } statusText.textContent = '数据已获取...'; break;
+                case 'text': streaming = true; finalText += evt.content; streamAppend(evt.content); statusText.textContent = '生成回答中...'; break;
+                case 'usage': if (evt.content && evt.content.total_tokens) { usageShow(evt.content); if (finalText) statusText.textContent = '共 ' + evt.content.total_tokens + ' tokens'; } break;
+                case 'done': reasoningHideDots(); if (streaming) { streamFinalize(); streaming = false; } break;
+                case 'error': loadingHide(); addMsg('bot', '<div class="chat-error">✗ ' + esc(evt.content) + '</div>'); statusText.textContent = '出错'; break;
+            }
+        }
+    }
+
+    // ---------- 保存 / 新对话 / 导出 ----------
+    function saveConv(userMsg, botReply) {
+        if (!botReply) return;
+        var h = loadHistory();
+        if (!h) h = { session_id: sessionId, messages: [] };
+        h.session_id = sessionId;
+        h.messages.push({ role: 'user', content: esc(userMsg) });
+        h.messages.push({ role: 'assistant', content: fmtMarkdown(botReply) });
+        if (h.messages.length > 100) h.messages = h.messages.slice(-100);
+        saveHistory(h.messages, sessionId);
+    }
+
+    function newChat() {
+        if (isProcessing) return;
+        var hasMsgs = messagesEl.querySelectorAll('.chat-msg').length > 0;
+        if (hasMsgs && !confirm('确定要开始新对话吗？当前对话记录将丢失。')) return;
+        messagesEl.innerHTML = '';
+        clearHistory();
+        sessionId = genSessionId();
+        localStorage.setItem('chat_session_id', sessionId);
+        // 重置首次对话标记
+        requestCount = 0;
+        // 显示欢迎
+        if (welcomeEl) welcomeEl.style.display = '';
+        statusText.textContent = '已就绪';
+        // 隐藏 tokens 栏
+        document.getElementById('tokensBar').style.display = 'none';
+        inputEl.focus();
+    }
+
+    function exportChat() {
+        var msgs = messagesEl.querySelectorAll('.chat-msg');
+        if (msgs.length === 0) return;
+        var txt = '===== AI 彩票对话记录 =====\n导出时间: ' + new Date().toLocaleString('zh-CN') + '\n会话ID: ' + sessionId + '\n==============================\n\n';
+        for (var i = 0; i < msgs.length; i++) {
+            var m = msgs[i];
+            var role = m.classList.contains('msg-user') ? '👤 我' : '🤖 AI';
+            var bubble = m.querySelector('.msg-bubble');
+            var text = bubble ? (bubble.textContent || bubble.innerText) : '';
+            txt += '【' + role + '】\n' + text.trim() + '\n\n';
+        }
+        var blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'AI对话_' + new Date().toISOString().slice(0, 10) + '.txt';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // ---------- 初始化 ----------
+    function init() {
+        var h = loadHistory();
+        if (h && h.messages && h.messages.length > 0) {
+            sessionId = h.session_id || sessionId;
+            if (h.session_id) localStorage.setItem('chat_session_id', h.session_id);
+            messagesEl.innerHTML = '';
+            for (const msg of h.messages) {
+                if (msg.role === 'user' || msg.role === 'assistant') {
+                    addMsg(msg.role, msg.content);
+                }
+            }
+            scrollBottom();
+        }
+        inputEl.focus();
+        // 页面加载后查询余额
+        setTimeout(fetchBalance, 500);
+    }
+
+    // ---------- 提示词点击 ----------
+    messagesEl.addEventListener('click', function(e) {
+        var hint = e.target.closest('.hint-item');
+        if (hint) {
+            inputEl.value = hint.dataset.hint;
+            inputEl.style.height = 'auto';
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+            sendMessage();
+        }
+    });
+
+    // ---------- 事件绑定 ----------
+    sendBtn.addEventListener('click', sendMessage);
+    inputEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+    inputEl.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
+    document.getElementById('newChatBtn').addEventListener('click', newChat);
+    document.getElementById('exportChatBtn').addEventListener('click', exportChat);
+
+    // ---------- 深度思考切换 ----------
+    var thinkingToggle = document.getElementById('thinkingToggle');
+    var deepThinkingCb = document.getElementById('deepThinking');
+    function updateThinkingUI() {
+        var cb = document.getElementById('deepThinking');
+        var toggle = document.getElementById('thinkingToggle');
+        if (cb && toggle) {
+            if (cb.checked) {
+                toggle.classList.remove('inactive');
+                toggle.classList.add('active');
+                toggle.querySelector('.toggle-label').textContent = '深度思考';
+            } else {
+                toggle.classList.remove('active');
+                toggle.classList.add('inactive');
+                toggle.querySelector('.toggle-label').textContent = '深度思考';
+            }
+        }
+    }
+    if (thinkingToggle && deepThinkingCb) {
+        thinkingToggle.addEventListener('click', function(e) {
+            e.preventDefault();
+            deepThinkingCb.checked = !deepThinkingCb.checked;
+            updateThinkingUI();
+        });
+        deepThinkingCb.addEventListener('change', function() {
+            updateThinkingUI();
+        });
+    }
+
+    init();
+})();
+</script>
+{% endblock %}

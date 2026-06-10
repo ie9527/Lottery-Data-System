@@ -1,6 +1,14 @@
 """统一配置文件 - 集中管理所有可配置参数"""
 
 import os
+from dotenv import load_dotenv
+
+# 加载 .env 文件（支持从项目根目录加载）
+dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path)
+else:
+    print(f"[config] .env not found at: {dotenv_path}")
 
 # ============================================================
 # 服务器配置
@@ -125,3 +133,34 @@ SEARCH_PAGE_SIZE = 30
 STATS_PAGE_SIZE = 100
 UNUSED_PAGE_SIZE = 200
 DRAW_PAGE_SIZE = 50
+
+# ============================================================
+# AI 对话配置
+# ============================================================
+# DeepSeek API 配置（支持环境变量覆盖）
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+if not DEEPSEEK_API_KEY:
+    print("[config] ⚠️ DEEPSEEK_API_KEY 未配置")
+else:
+    print(f"[config] ✅ DEEPSEEK_API_KEY 已配置 ({DEEPSEEK_API_KEY[:12]}...)")
+DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_USE_BETA = os.environ.get("DEEPSEEK_USE_BETA", "True").strip().lower() in ("true", "1", "yes")
+DEEPSEEK_THINKING_ENABLED = os.environ.get("DEEPSEEK_THINKING_ENABLED", "True").strip().lower() in ("true", "1", "yes")
+DEEPSEEK_REASONING_EFFORT = os.environ.get("DEEPSEEK_REASONING_EFFORT", "high")
+
+# 对话限制
+CHAT_MAX_HISTORY = 20                          # 最大历史轮次
+CHAT_MAX_TOKENS = 8192                         # 单次最大输出 tokens（复杂分析需要更大输出）
+CHAT_TIMEOUT_SECONDS = 60                      # API 超时时间（复杂查询可能更久）
+CHAT_TOOL_CALLS_LIMIT = 20                     # 单次对话最多工具调用次数
+CHAT_RATE_LIMIT_PER_MIN = 10                   # 每分钟每用户最大请求数
+CHAT_SESSION_TTL = 3600                        # 会话过期时间（1小时）
+
+# ============================================================
+# DeepSeek 定价标准（元/百万 tokens）
+# ============================================================
+# 参考: https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+DEEPSEEK_PRICE_CACHE_HIT = 0.02    # 缓存命中输入价格
+DEEPSEEK_PRICE_CACHE_MISS = 1.0    # 缓存未命中输入价格
+DEEPSEEK_PRICE_OUTPUT = 2.0        # 输出价格

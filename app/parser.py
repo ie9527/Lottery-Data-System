@@ -115,6 +115,15 @@ def parse_line_dlt(fields):
     }
 
 
+def _safe_int(val, default=0):
+    """安全转换为整数，无法转换时返回默认值"""
+    try:
+        v = int(val)
+        return v
+    except (ValueError, TypeError):
+        return default
+
+
 def parse_line_qxc(fields):
     """解析七星彩数据行 (23列)"""
     numbers = [int(fields[2]), int(fields[3]), int(fields[4]),
@@ -122,15 +131,15 @@ def parse_line_qxc(fields):
 
     return {
         "numbers": numbers,
-        "sale_amount": int(fields[9]),
-        "prize_pool": int(fields[10]),
+        "sale_amount": _safe_int(fields[9]),
+        "prize_pool": _safe_int(fields[10]),
         "prizes": [
-            {"name": "特等奖", "count": int(fields[11]), "amount": int(fields[12])},
-            {"name": "一等奖", "count": int(fields[13]), "amount": int(fields[14])},
-            {"name": "二等奖", "count": int(fields[15]), "amount": int(fields[16])},
-            {"name": "三等奖", "count": int(fields[17]), "amount": int(fields[18])},
-            {"name": "四等奖", "count": int(fields[19]), "amount": int(fields[20])},
-            {"name": "五等奖", "count": int(fields[21]), "amount": int(fields[22])},
+            {"name": "特等奖", "count": _safe_int(fields[11]), "amount": _safe_int(fields[12])},
+            {"name": "一等奖", "count": _safe_int(fields[13]), "amount": _safe_int(fields[14])},
+            {"name": "二等奖", "count": _safe_int(fields[15]), "amount": _safe_int(fields[16])},
+            {"name": "三等奖", "count": _safe_int(fields[17]), "amount": _safe_int(fields[18])},
+            {"name": "四等奖", "count": _safe_int(fields[19]), "amount": _safe_int(fields[20])},
+            {"name": "五等奖", "count": _safe_int(fields[21]), "amount": _safe_int(fields[22])},
         ]
     }
 

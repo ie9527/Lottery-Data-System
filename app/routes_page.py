@@ -4,7 +4,7 @@ import json
 import os
 import sys
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -331,15 +331,21 @@ async def lottery_unused(request: Request, lottery_code: str,
     if not current_type:
         return HTMLResponse("彩票类型不存在", status_code=404)
 
-    from app.unused import get_unused_numbers, get_period_draws, get_period_stats_all, get_unused_for_qxc
+    # 仅 3D/排列三/排列五 支持未开奖号码
+    if lottery_code not in ("3d", "p3", "p5"):
+        return RedirectResponse(url=f"/{lottery_code}")
 
-    # 未开奖号码数据（仅数字彩支持）
-    unused_data = None
-    if lottery_code in ("3d", "p3", "p5"):
-        unused_data = get_unused_numbers(lottery_code, page=page, page_size=200,
-                                         year_range=year_range, date_from=date_from, date_to=date_to)
-    elif lottery_code == "qxc":
-        unused_data = get_unused_for_qxc(lottery_code, date_from=date_from, date_to=date_to)
+    from app.unused import get_unused_numbers, get_period_draws, get_period_stats_all
+
+    # 将 UI 传入的 period 参数映射到 year_range（get_unused_numbers 实际使用）
+    if period and period != "all" and year_range == "all":
+        # period 的键值来自 PERIOD_LABELS: 1w/1m/6m/1y/3y/10y/all
+        # 与 get_unused_numbers 的 delta_map 兼容
+        year_range = period
+
+    # 未开奖号码数据
+    unused_data = get_unused_numbers(lottery_code, page=page, page_size=200,
+                                     year_range=year_range, date_from=date_from, date_to=date_to)
 
     # 时段开奖数据
     period_data = get_period_draws(lottery_code, period_key=period,

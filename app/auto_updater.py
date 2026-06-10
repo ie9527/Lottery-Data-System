@@ -7,7 +7,7 @@ from app.fetcher import fetch_json_api, JSON_LOTID_MAP, fetch_data, SYSTEM_TO_JS
 from app.stats_builder import build_number_stats
 from app.draw_schedule import should_check_update
 from app.json_parser import parse_json_numbers
-from app.parser import parse_line
+from app.parser import parse_line, _safe_int
 from app.logger import logger, log_update, log_polling
 
 
@@ -67,15 +67,20 @@ def do_json_update():
         # 写入数据库
         cursor.execute("""
             INSERT OR IGNORE INTO lottery_draws
-            (lottery_code, draw_number, draw_date, numbers, trial_numbers, draw_order)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (lottery_code, draw_number, draw_date, numbers, trial_numbers, machine_ball, draw_order, sale_amount, prize_pool, prizes, extra)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             db_code,
             str(issue),
             draw_date,
             parsed["numbers"],
             parsed.get("trial_numbers"),
+            None,
             parsed.get("draw_order"),
+            None,
+            None,
+            None,
+            None,
         ))
 
         if cursor.rowcount > 0:
@@ -117,7 +122,38 @@ def do_json_update():
     return result
 
 
-def catch_up_missing():
+def _check_sequence_gap(cursor, db_code: str) -> bool:
+    """检查彩种期号是否存在断层
+
+    如果数据库中最新的两条记录期号差值 > 1，说明存在断层。
+    例如：最新=2026151，次新=2026149，差值=2 → 有断层（缺少2026150）
+
+    Args:
+        cursor: 数据库游标
+        db_code: 彩种代码
+
+    Returns:
+        True=存在断层（需要补齐），False=连续或无法判断
+    """
+    cursor.execute(
+        "SELECT draw_number FROM lottery_draws WHERE lottery_code=? ORDER BY draw_number DESC LIMIT 2",
+        (db_code,)
+    )
+    rows = cursor.fetchall()
+    if len(rows) < 2:
+        return False
+    try:
+        latest = int(rows[0]["draw_number"])
+        second = int(rows[1]["draw_number"])
+        has_gap = (latest - second) > 1
+        if has_gap:
+            print(f"  [连续性检测] {db_code}: 最新={latest}, 次新={second}, 断层={latest-second-1}期")
+        return has_gap
+    except (ValueError, TypeError):
+        return False
+
+
+def catch_up_missing(force=False):
     """断服补数据 - 检测并补齐服务器离线期间遗漏的开奖数据
 
     流程：
@@ -126,6 +162,10 @@ def catch_up_missing():
     3. 若差距超过预期间隔，下载 TXT 历史文件补齐缺失数据
     4. 使用 INSERT OR IGNORE 避免重复
     5. 重建被更新彩种的号码统计
+
+    Args:
+        force: True=强制所有彩种下载TXT逐行校验（手动更新用）
+               False=仅检测到缺失或断层时才下载（自动更新用）
 
     Returns:
         dict: {"total_added": int, "updates": {lottery_code: added_count}}
@@ -159,10 +199,17 @@ def catch_up_missing():
             (db_code,)
         )
         last_row = cursor.fetchone()
-        if last_row:
-            # 如果 API 返回的最新期号已经存在，跳过
+        if last_row and not force:
+            # 非强制模式下：如果 API 返回的最新期号已经存在
             if str(api_issue) == last_row["draw_number"]:
-                continue
+                # 还需检查期号是否存在断层（中间少了期）
+                if not _check_sequence_gap(cursor, db_code):
+                    continue  # 无断层 → 数据完整，跳过
+                else:
+                    print(f"[补数据] {db_code}: 检测到期号断层，下载 TXT 文件补齐")
+        elif last_row and force:
+            # 强制模式下：无论最新期号是否一致，都下载 TXT 逐行校验
+            print(f"[补数据] {db_code}: 强制全量校验，下载 TXT 文件")
         else:
             # 数据库无该彩种数据 → 需要全量导入
             pass
@@ -195,18 +242,22 @@ def catch_up_missing():
             if not parsed:
                 continue
 
-            numbers = parsed.pop("numbers")
             cursor.execute("""
                 INSERT OR IGNORE INTO lottery_draws
-                (lottery_code, draw_number, draw_date, numbers, trial_numbers, draw_order)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (lottery_code, draw_number, draw_date, numbers, trial_numbers, machine_ball, draw_order, sale_amount, prize_pool, prizes, extra)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 db_code,
                 draw_number,
                 draw_date,
-                json.dumps(numbers),
-                json.dumps(parsed.pop("trial_numbers", None)) if "trial_numbers" in parsed else None,
-                json.dumps(parsed.pop("draw_order", None)) if "draw_order" in parsed else None,
+                json.dumps(parsed.get("numbers", [])),
+                json.dumps(parsed.get("trial_numbers")) if parsed.get("trial_numbers") else None,
+                json.dumps(parsed.get("machine_ball")) if parsed.get("machine_ball") else None,
+                json.dumps(parsed.get("draw_order")) if parsed.get("draw_order") else None,
+                _safe_int(parsed.get("sale_amount"), 0),
+                _safe_int(parsed.get("prize_pool"), 0) if parsed.get("prize_pool") is not None else None,
+                json.dumps(parsed.get("prizes", [])),
+                json.dumps(parsed.get("extra")) if parsed.get("extra") else None,
             ))
 
             if cursor.rowcount > 0:
@@ -287,9 +338,14 @@ async def smart_update_loop(check_interval=600):
 
         # ─── 非活动窗口：休眠到下一个 21:00 ───
         if now.hour < POLL_START_HOUR or now.hour >= SAFETY_END_HOUR:
-            next_day = date.today() + timedelta(days=1)
-            next_start = datetime.combine(next_day, time(POLL_START_HOUR, 0))
-            sleep_seconds = (next_start - datetime.now()).total_seconds()
+            if now.hour < POLL_START_HOUR:
+                # 今日尚未到活动窗口 → 等待今日的 POLL_START_HOUR
+                next_start = datetime.combine(now.date(), time(POLL_START_HOUR, 0))
+            else:
+                # 已过安全终止时间 → 等待明天 POLL_START_HOUR
+                next_day = now.date() + timedelta(days=1)
+                next_start = datetime.combine(next_day, time(POLL_START_HOUR, 0))
+            sleep_seconds = (next_start - now).total_seconds()
             print(
                 f"[自动更新] 当前不在活动窗口 (起始 {POLL_START_HOUR}:00)，"
                 f"休眠 {sleep_seconds/3600:.1f} 小时至 {next_start.strftime('%Y-%m-%d %H:%M')}"
@@ -364,6 +420,13 @@ async def smart_update_loop(check_interval=600):
                     )
                     print(f"[自动更新] 新增 {result['total_added']} 条 ({code_summary})")
                     log_polling("数据更新", f"{code_summary}")
+
+                    # ★ 新增：新数据写入后，检查期号连续性，有断层则补齐
+                    print("[自动更新] 检查期号连续性...")
+                    try:
+                        catch_up_missing()
+                    except Exception as gap_e:
+                        print(f"[自动更新] 连续性检查出错: {gap_e}")
                     
                     # 检查是否所有今日开奖彩种都已更新
                     all_done = all(

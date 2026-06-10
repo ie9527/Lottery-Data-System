@@ -79,7 +79,10 @@
 <div class="sys-log-section">
     <div class="sys-log-header">
         <span>📝</span> 更新轮训日志
-        <button class="sys-btn-small" onclick="sysClearLog()">清空日志</button>
+        <div style="margin-left:auto;display:flex;gap:6px;">
+            <button class="sys-btn-small" onclick="sysRebuildStats()">重建统计</button>
+            <button class="sys-btn-small" onclick="sysClearLog()">清空日志</button>
+        </div>
     </div>
     <div class="sys-log-body" id="sysLogBody">
         <div class="sys-log-entry sys-log-info">系统启动，等待检测...</div>
@@ -358,7 +361,32 @@ function sysClearLog() {
     addLog('日志已清空', 'info');
 }
 
+function sysRebuildStats() {
+    if (!confirm('确定要重建所有彩种的号码统计吗？\n此操作将重新扫描全部开奖记录，耗时约10-30秒。')) return;
+    addLog('开始重建所有彩种统计...', 'info');
+    fetch('/api/rebuild-all-stats', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.status === 'success') {
+                addLog('统计重建完成: ' + d.message, 'success');
+                var details = '';
+                for (var code in d.results) {
+                    var r = d.results[code];
+                    details += code + '=' + (r.direct_count || 'err') + ' ';
+                }
+                addLog(details, 'info');
+            } else {
+                addLog('统计重建失败: ' + (d.message || '未知错误'), 'error');
+            }
+        })
+        .catch(function(e) {
+            addLog('统计重建请求失败: ' + e.message, 'error');
+        });
+}
+
 // ========== 冷却倒计时管理 ==========
+
+var _sysInterval = null;  // 保存定时器引用
 
 function updateCooldownDisplay(seconds) {
     var el = document.getElementById('sysCooldown');
@@ -408,6 +436,8 @@ function updateCooldownDisplay(seconds) {
 
 // ========== 获取状态数据（合并接口） ==========
 async function refreshSysStatus() {
+    // 页面不可见时不请求（避免 ERR_ABORTED）
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
         var resp = await fetch('/api/system/status');
         var result = await resp.json();
@@ -552,13 +582,20 @@ document.addEventListener('DOMContentLoaded', function() {
     // 首次加载（合并接口，一次请求获取全部状态）
     refreshSysStatus();
 
-    // 定时刷新状态（每10秒）
-    setInterval(refreshSysStatus, 10000);
+    // 定时刷新状态（每10秒）- 页面不可见时不刷新
+    _sysInterval = setInterval(function() {
+        if (!document.hidden) refreshSysStatus();
+    }, 10000);
 
     // visibilitychange 时主动刷新
     document.addEventListener('visibilitychange', function() {
         if (!document.hidden) refreshSysStatus();
     });
+});
+
+// 页面卸载时清除定时器，避免 ERR_ABORTED
+window.addEventListener('beforeunload', function() {
+    if (_sysInterval) { clearInterval(_sysInterval); _sysInterval = null; }
 });
 </script>
 {% endblock %}

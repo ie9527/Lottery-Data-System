@@ -12,6 +12,8 @@ def get_unused_numbers(lottery_code, page=1, page_size=200, year_range="all",
 
     支持自定义日期范围：若 date_from 和 date_to 同时提供，优先使用自定义日期
 
+    ★ 始终从 lottery_draws 直接查询（来源表），避免 number_stats 不完整导致已开出号码被误列为未开出
+
     Args:
         lottery_code: 彩种代码
         page: 页码
@@ -35,13 +37,20 @@ def get_unused_numbers(lottery_code, page=1, page_size=200, year_range="all",
         return None
 
     today = datetime.now()
-    date_threshold = None
     range_label = _get_range_label(year_range, date_from, date_to)
+
+    total_possible = 10 ** digits
+
+    # ── 从 lottery_draws 中获取所有已开奖号码（源表，始终最新） ──
+    conditions = ["lottery_code=?"]
+    params = [lottery_code]
 
     # 优先使用自定义日期
     if date_from and date_to:
-        date_from_val = date_from
-        date_to_val = date_to
+        conditions.append("draw_date >= ?")
+        params.append(date_from)
+        conditions.append("draw_date <= ?")
+        params.append(date_to)
     else:
         # 预设时间范围
         delta_map = {
@@ -52,46 +61,29 @@ def get_unused_numbers(lottery_code, page=1, page_size=200, year_range="all",
             "6m": 180,
             "3m": 90,
             "1m": 30,
+            "1w": 7,
+            "10y": 365 * 10,
         }
         days = delta_map.get(year_range)
         if days is not None:
             date_threshold = (today - timedelta(days=days)).strftime("%Y-%m-%d")
-        date_from_val = date_threshold
-        date_to_val = None
+            conditions.append("draw_date >= ?")
+            params.append(date_threshold)
 
-    total_possible = 10 ** digits
+    where = " AND ".join(conditions)
 
-    if date_from_val is None and date_to_val is None:
-        # 全部历史
-        cursor.execute(
-            "SELECT number_text FROM number_stats WHERE lottery_code=? AND stat_type='direct'",
-            (lottery_code,)
-        )
-        appeared = set(row["number_text"] for row in cursor.fetchall())
-    else:
-        # 按日期范围筛选
-        if date_from_val and date_to_val:
-            cursor.execute(
-                "SELECT numbers FROM lottery_draws WHERE lottery_code=? AND draw_date >= ? AND draw_date <= ? ORDER BY draw_number",
-                (lottery_code, date_from_val, date_to_val)
-            )
-        elif date_from_val:
-            cursor.execute(
-                "SELECT numbers FROM lottery_draws WHERE lottery_code=? AND draw_date >= ? ORDER BY draw_number",
-                (lottery_code, date_from_val)
-            )
-        else:
-            cursor.execute(
-                "SELECT numbers FROM lottery_draws WHERE lottery_code=? AND draw_date <= ? ORDER BY draw_number",
-                (lottery_code, date_to_val)
-            )
-        appeared = set()
-        for row in cursor.fetchall():
-            nums = json.loads(row["numbers"])
-            num_str = extract_number_string(lottery_code, nums)
-            if num_str:
-                appeared.add(num_str)
+    cursor.execute(
+        f"SELECT numbers FROM lottery_draws WHERE {where} ORDER BY draw_number",
+        params
+    )
+    appeared = set()
+    for row in cursor.fetchall():
+        nums = json.loads(row["numbers"])
+        num_str = extract_number_string(lottery_code, nums)
+        if num_str:
+            appeared.add(num_str)
 
+    # ── 计算未开出的号码 ──
     unused = []
     for i in range(total_possible):
         num_str = str(i).zfill(digits)
@@ -139,6 +131,7 @@ def _get_range_label(year_range, date_from, date_to):
         "all": "全部历史", "5y": "近5年", "3y": "近3年",
         "2y": "近2年", "1y": "近1年",
         "6m": "近半年", "3m": "近3月", "1m": "近1月",
+        "1w": "一周历史", "10y": "十年历史",
     }
     return labels.get(year_range, year_range or "全部历史")
 
@@ -238,7 +231,12 @@ def check_number_history(lottery_code, number_str, num_type="single"):
 def _check_number_in_draw(nums, lottery_code, query_num, num_type):
     """检查号码是否在开奖号码中"""
     if isinstance(nums, list):
-        # 简单列表（3D/P3/P5/QXC/KL8）
+        # 个位数彩种（3D/P3/P5/QXC）：号码为多位数字的各位，需拼接后比较
+        if lottery_code in ("3d", "p3", "p5", "qxc"):
+            num_str = "".join(str(n) for n in nums)
+            query_str = str(query_num).zfill(len(nums))
+            return num_str == query_str
+        # 简单列表（KL8等）：直接查询单个数字是否存在
         return query_num in nums
 
     elif isinstance(nums, dict):
@@ -547,32 +545,26 @@ def get_today_history(lottery_code, date_str=None):
 def get_draw_by_number(lottery_code, draw_number):
     """按期号查询开奖数据，附带前后期号
 
-    支持忽略日期前缀的模糊匹配（如输入 '001' 可匹配 '2024001'）
+    支持忽略日期前缀的模糊匹配（如输入 '318' 可匹配 '2025318'）
+
+    Args:
+        lottery_code: 彩种代码
+        draw_number: 期号（支持短号，如 "318"）
+
+    Returns:
+        dict | None: 开奖记录（含 prev_draw、next_draw），或 None
     """
     import json
+    from app.database import match_draw_number
+
+    d = match_draw_number(lottery_code, draw_number)
+    if not d:
+        return None
+
     conn = get_connection()
     cursor = conn.cursor()
 
-    # 先尝试精确匹配
-    cursor.execute(
-        "SELECT * FROM lottery_draws WHERE lottery_code=? AND draw_number=?",
-        (lottery_code, draw_number)
-    )
-    row = cursor.fetchone()
-
-    # 精确匹配失败 → 尝试后缀匹配（忽略日期前缀）
-    if not row and draw_number.isdigit():
-        # 用 LIKE 匹配末尾数字（如 001 → %001）
-        cursor.execute(
-            "SELECT * FROM lottery_draws WHERE lottery_code=? AND draw_number LIKE ? ORDER BY LENGTH(draw_number) ASC, draw_number ASC LIMIT 1",
-            (lottery_code, f"%{draw_number}")
-        )
-        row = cursor.fetchone()
-
-    if not row:
-        conn.close()
-        return None
-    d = dict(row)
+    # 解析JSON字段
     for key in ("numbers", "prizes", "trial_numbers", "machine_ball", "draw_order"):
         if d.get(key):
             try:

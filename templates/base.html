@@ -26,6 +26,12 @@
         <a href="/" class="sidebar-item {% if page == 'home' %}active{% endif %}">
             <span class="item-icon">🏠</span> 首页
         </a>
+        <a href="/chat" class="sidebar-item {% if page == 'chat' %}active{% endif %}">
+            <span class="item-icon">🤖</span> AI 对话
+        </a>
+        <a href="/system" class="sidebar-item {% if sub_page == 'system' %}active{% endif %}">
+            <span class="item-icon">📋</span> 系统日志
+        </a>
     </div>
 
         <!-- 数字彩组 -->
@@ -58,14 +64,6 @@
             <a href="/kl8" class="sidebar-item {% if lottery_code == 'kl8' %}active{% endif %}">
                 <span class="lottery-dot" style="background:#2e7d32"></span>
                 快乐八
-            </a>
-        </div>
-
-        <!-- 系统管理 -->
-        <div class="sidebar-group">
-            <div class="sidebar-group-title">系统</div>
-            <a href="/system" class="sidebar-item {% if sub_page == 'system' %}active{% endif %}">
-                <span class="item-icon">📋</span> 系统日志
             </a>
         </div>
     </div>
@@ -106,7 +104,9 @@
         {% endif %}
         {% set _ = sub_funcs.append(('/' + lottery_code + '/ranking', '排行分析', '🏆', 'ranking')) %}
         {% set _ = sub_funcs.append(('/' + lottery_code + '/today', '历史的今天', '📅', 'today')) %}
+        {% if lottery_code in ('3d','p3','p5') %}
         {% set _ = sub_funcs.append(('/' + lottery_code + '/unused', '未开奖号', '❌', 'unused')) %}
+        {% endif %}
         {% for url, name, icon, sub in sub_funcs %}
         <a href="{{ url }}" class="sub-nav-item {% if sub_page == sub %}active{% endif %}">
             <span class="sub-nav-icon">{{ icon }}</span>

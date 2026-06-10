@@ -53,6 +53,10 @@ async def log_requests(request: Request, call_next):
         )
 
 
+# 注册 AI 对话页面路由（必须在 page_router 之前，避免被 /{lottery_code} 抢断）
+from app.chat.router import page_router as chat_page_router
+app.include_router(chat_page_router)
+
 # 注册页面路由
 from app.routes_page import router as page_router
 app.include_router(page_router)
@@ -61,12 +65,19 @@ app.include_router(page_router)
 from app.routes_api import router as api_router
 app.include_router(api_router, prefix="/api")
 
+# 注册 AI 对话 API 路由
+from app.chat.router import router as chat_router
+app.include_router(chat_router, prefix="/api")
+
 
 @app.on_event("startup")
 async def startup():
     init_database()
     import asyncio
     asyncio.create_task(smart_update_loop(check_interval=POLL_INTERVAL))
+    # 启动会话清理任务
+    from app.chat.context import clean_expired_sessions
+    asyncio.create_task(clean_expired_sessions())
     logger.info("数据库初始化完成")
     logger.info(f"后台智能更新已启动（每 {POLL_INTERVAL//60} 分钟检查一次）")
     logger.info(f"访问 http://{SERVER_HOST}:{SERVER_PORT} 查看页面")

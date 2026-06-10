@@ -18,7 +18,7 @@ from app.auto_updater import catch_up_missing, do_json_update
 from app.cache import (cached, delete as cache_delete, clear as cache_clear,
                        get_manual_update_cooldown, set_manual_update_timestamp,
                        can_manual_update)
-from app.config import CACHE_SYSTEM_STATS_TTL, CACHE_COUNTDOWN_TTL, CACHE_SYSTEM_STATUS_TTL
+from app.config import CACHE_SYSTEM_STATS_TTL, CACHE_COUNTDOWN_TTL, CACHE_SYSTEM_STATUS_TTL, POLL_START_HOUR, POLL_END_HOUR
 
 router = APIRouter()
 
@@ -163,6 +163,57 @@ async def api_history_detail(
 async def api_number_stats_page(lottery_code: str, page: int = 1):
     data = get_all_number_stats(lottery_code, page=page, page_size=100)
     return {"status": "success", **data}
+
+
+@router.get("/{lottery_code}/batch-number-stats")
+async def api_batch_number_stats(lottery_code: str, numbers: str = ""):
+    """批量查询多个号码的直选和组选出现次数
+    
+    numbers: 逗号分隔的号码列表，如 '111,222,333'
+    """
+    if not numbers:
+        return {"status": "error", "message": "请提供要查询的号码列表"}
+    
+    num_list = [n.strip() for n in numbers.split(",") if n.strip()]
+    if not num_list:
+        return {"status": "error", "message": "号码列表为空"}
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    results = []
+    for num in num_list:
+        # 直选统计
+        cursor.execute(
+            "SELECT appear_count FROM number_stats WHERE lottery_code=? AND number_text=? AND stat_type='direct'",
+            (lottery_code, num)
+        )
+        direct_row = cursor.fetchone()
+        direct_count = direct_row["appear_count"] if direct_row else 0
+        
+        # 组选统计（对数字排序后查询）
+        from app.matcher import SINGLE_DIGIT_TYPES
+        if lottery_code in SINGLE_DIGIT_TYPES:
+            sorted_digits = sorted(num)
+            group_key = "".join(sorted_digits)
+        else:
+            group_key = num
+        
+        cursor.execute(
+            "SELECT appear_count FROM number_stats WHERE lottery_code=? AND number_text=? AND stat_type='group'",
+            (lottery_code, group_key)
+        )
+        group_row = cursor.fetchone()
+        group_count = group_row["appear_count"] if group_row else 0
+        
+        results.append({
+            "number": num,
+            "direct_count": direct_count,
+            "group_count": group_count,
+        })
+    
+    conn.close()
+    return {"status": "success", "data": results}
 
 
 @router.get("/{lottery_code}/unused-numbers")
@@ -437,6 +488,151 @@ async def api_appear_detail(lottery_code: str, q: str = ""):
 
 
 # ============================================================
+# 新增 API 端点
+# ============================================================
+
+@router.get("/types/{lottery_code}")
+async def api_type_info(lottery_code: str):
+    """获取单个彩种详细信息"""
+    types = get_all_types()
+    for t in types:
+        if t["code"] == lottery_code:
+            return {"status": "success", "data": t}
+    return {"status": "error", "message": "彩票类型不存在"}
+
+
+@router.get("/{lottery_code}/draw/{draw_number}")
+async def api_draw_by_number(lottery_code: str, draw_number: str):
+    """按期号查询单期开奖数据（支持短号模糊匹配，如 318 → 2025318）
+
+    Args:
+        lottery_code: 彩种代码
+        draw_number: 期号（支持短号，自动匹配年份前缀）
+
+    Returns:
+        开奖记录含JSON解析后的字段
+    """
+    from app.database import match_draw_number
+    from app.unused import get_draw_by_number
+
+    # 先用 match_draw_number 做初步匹配（返回原始行）
+    d = get_draw_by_number(lottery_code, draw_number)
+    if not d:
+        return {"status": "error", "message": "未找到该期号"}
+    return {"status": "success", "data": d}
+
+
+@router.get("/{lottery_code}/period-stats")
+async def api_period_stats(lottery_code: str):
+    """获取指定彩种各时间段的统计数据
+
+    Returns:
+        periods: [{key, label, count}, ...] 各时间段开奖期数
+        first_date: 首期日期
+        last_date: 末期日期
+    """
+    types = get_all_types()
+    if not any(t["code"] == lottery_code for t in types):
+        return {"status": "error", "message": "彩票类型不存在"}
+    from app.unused import get_period_stats_all
+    data = get_period_stats_all(lottery_code)
+    return {"status": "success", "data": data}
+
+
+@router.get("/{lottery_code}/stats/grouped")
+async def api_grouped_stats(lottery_code: str):
+    """获取按出现次数分组的号码统计
+
+    适用于大乐透、双色球、七星彩、快乐八等组合彩种。
+    3D/排列三/排列五返回空。
+
+    Returns:
+        grouped_stats: bool
+        groups: [{label, stats: [{count, numbers}, ...]}, ...]
+        total_draws: int
+    """
+    types = get_all_types()
+    if not any(t["code"] == lottery_code for t in types):
+        return {"status": "error", "message": "彩票类型不存在"}
+    from app.stats_builder import get_grouped_stats
+    data = get_grouped_stats(lottery_code)
+    if data is None:
+        return {"status": "success", "data": None, "message": "该彩种不适用分组统计"}
+    return {"status": "success", "data": data}
+
+
+@router.get("/{lottery_code}/draws/period")
+async def api_draws_period(
+    lottery_code: str,
+    period: str = "all",
+    date_from: str = "",
+    date_to: str = "",
+    draw_from: str = "",
+    draw_to: str = "",
+    page: int = 1,
+    page_size: int = 50,
+):
+    """获取指定时间段内的开奖数据
+
+    Args:
+        lottery_code: 彩种代码
+        period: 时间段 (1w/1m/6m/1y/3y/10y/all)
+        date_from/to: 自定义日期范围
+        draw_from/to: 期号范围
+        page: 页码
+        page_size: 每页条数
+
+    Returns:
+        draws: [开奖记录...]
+        total, page, page_size, total_pages
+        period_key, period_label
+        has_prev, has_next
+    """
+    from app.unused import get_period_draws
+    data = get_period_draws(lottery_code, period_key=period,
+                             date_from=date_from, date_to=date_to,
+                             draw_from=draw_from, draw_to=draw_to,
+                             page=page, page_size=page_size)
+    return {"status": "success", "data": data}
+
+
+@router.get("/{lottery_code}/schedule")
+async def api_lottery_schedule(lottery_code: str):
+    """获取指定彩种的开奖时间配置
+
+    Returns:
+        lottery_code: str
+        draw_days: [0-6] 开奖日（0=周一）
+        draw_time: "HH:MM" 开奖时间
+        days_cn: ["周一", ...] 中文开奖日
+        next_draw: 下场开奖时间 ISO 格式
+        countdown_seconds: 倒计时秒数
+    """
+    from app.draw_schedule import SCHEDULE, get_next_draw, DAYS_CN
+
+    sched = SCHEDULE.get(lottery_code)
+    if not sched:
+        return {"status": "error", "message": "该彩种无开奖时间配置"}
+
+    next_draw = get_next_draw(lottery_code)
+    countdown = None
+    if next_draw:
+        countdown = int((next_draw - datetime.now()).total_seconds())
+
+    return {
+        "status": "success",
+        "data": {
+            "lottery_code": lottery_code,
+            "draw_days": sched["days"],
+            "draw_time": sched["time"],
+            "days_cn": [DAYS_CN[d] for d in sched["days"]],
+            "next_draw": next_draw.isoformat() if next_draw else None,
+            "countdown_seconds": max(0, countdown) if countdown is not None else None,
+        }
+    }
+
+
+# ============================================================
 # 统计数据
 # ============================================================
 
@@ -509,15 +705,24 @@ async def api_system_status():
         conn2 = get_connection()
         cursor2 = conn2.cursor()
         cursor2.execute(
-            "SELECT MAX(update_time) as last_time FROM update_log WHERE date(update_time)=?",
+            "SELECT MAX(update_time) as last_time, message FROM update_log WHERE date(update_time)=?",
             (today_str,)
         )
         last_poll = cursor2.fetchone()
         poll_active = False
         if last_poll and last_poll["last_time"]:
             try:
+                # 1. 当前时间必须在活动窗口内
+                now = datetime.now()
+                in_window = POLL_START_HOUR <= now.hour < POLL_END_HOUR
+                # 2. 最新日志不能是终止性消息
+                last_msg = last_poll["message"] or ""
+                is_terminated = any(kw in last_msg for kw in ["轮训结束", "跳过轮训", "非活动窗口"])
+                # 3. 30分钟内有操作
                 last_poll_time = datetime.fromisoformat(last_poll["last_time"])
-                poll_active = (datetime.now() - last_poll_time).total_seconds() < 1800  # 30分钟内
+                recent_activity = (now - last_poll_time).total_seconds() < 1800
+
+                poll_active = in_window and not is_terminated and recent_activity
             except (ValueError, TypeError):
                 poll_active = False
         conn2.close()
@@ -587,38 +792,6 @@ async def api_stats_overview(lottery_code: str):
     }
 
 
-@router.get("/stats/system")
-@cached(ttl=CACHE_SYSTEM_STATS_TTL)
-async def api_system_stats():
-    """系统统计信息（缓存5分钟）"""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT COUNT(*) as cnt FROM lottery_draws")
-    total_draws = cursor.fetchone()["cnt"]
-
-    cursor.execute("SELECT COUNT(*) as cnt FROM number_stats")
-    total_stats = cursor.fetchone()["cnt"]
-
-    cursor.execute("SELECT lottery_code, COUNT(*) as cnt FROM lottery_draws GROUP BY lottery_code ORDER BY cnt DESC")
-    per_type = {r["lottery_code"]: r["cnt"] for r in cursor.fetchall()}
-
-    cursor.execute("SELECT COUNT(*) as cnt FROM lottery_types WHERE active=1")
-    type_count = cursor.fetchone()["cnt"]
-
-    conn.close()
-
-    return {
-        "status": "success",
-        "data": {
-            "total_draws": total_draws,
-            "total_stats_records": total_stats,
-            "type_count": type_count,
-            "draws_per_type": per_type,
-        }
-    }
-
-
 # ============================================================
 # 手动更新（全局冷却：1 小时，后端强制校验）
 # 必须在 /update/{lottery_code} 之前定义，避免路由冲突
@@ -649,9 +822,9 @@ async def api_manual_update():
     start = time.time()
     set_manual_update_timestamp()  # 立即锁定，防止并发
 
-    # 执行更新
+    # 执行更新（force=True 强制全量 TXT 逐行校验）
     json_result = do_json_update()
-    catch_up_result = catch_up_missing()
+    catch_up_result = catch_up_missing(force=True)
     cache_clear()
 
     elapsed = round(time.time() - start, 2)
@@ -748,6 +921,25 @@ async def api_build_stats(lottery_code: str):
         return {"status": "error", "message": "彩票类型不存在"}
     result = build_number_stats(lottery_code)
     return {"status": "success", "message": f"统计完成，共 {result['direct_count']} 个直选号码", **result}
+
+
+@router.post("/rebuild-all-stats")
+async def api_rebuild_all_stats():
+    """重建所有彩种的号码统计"""
+    types = get_all_types()
+    results = {}
+    for t in types:
+        code = t["code"]
+        try:
+            r = build_number_stats(code)
+            results[code] = {"direct_count": r["direct_count"], "status": "ok"}
+        except Exception as e:
+            results[code] = {"error": str(e), "status": "error"}
+    return {
+        "status": "success",
+        "message": f"已重建 {len(results)} 个彩种统计",
+        "results": results
+    }
 
 
 @router.post("/update-json")

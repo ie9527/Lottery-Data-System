@@ -1,10 +1,19 @@
-# 彩票数据系统3.0
-持续更新.....(当前版本 2026年6月9日)
-基于 **FastAPI** 构建的彩票开奖数据采集、存储、查询与分析平台。支持多彩种历史数据抓取、智能轮询更新、号码统计分析、排行分析及未开奖号码预测等功能。
+# 彩票数据系统
+
+基于 **FastAPI** 构建的彩票开奖数据采集、存储、查询与分析平台。支持多彩种历史数据抓取、智能轮询更新、号码统计分析、排行分析、未开奖号码预测及 **AI 智能对话**等功能。
 
 ---
 
 ## 功能特性
+
+### 🤖 AI 智能对话
+- **自然语言查询**：通过 AI 对话直接查询开奖号码、号码统计、历史记录
+- **20+ 数据查询工具**：涵盖日期查询、期号查询、号码统计、组选查询、未开号码、复杂条件统计等
+- **流式输出**：SSE 实时推送思考过程和回答内容
+- **Markdown 渲染**：对话内容支持表格、代码块、列表等 markdown 格式
+- **Token 用量统计**：实时显示输入/输出 tokens 及缓存命中情况
+- **余额估算**：基于实际用量动态计算费用
+- **思考模式**：复杂分析问题自动启用心智链推理
 
 ### 数据采集
 - **多源数据抓取**：支持 JSON API 和 TXT 文件两种数据源
@@ -153,6 +162,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 
 ```
 ├── run.py                  # 启动脚本（推荐）
+├── .env.example            # 环境变量示例（DeepSeek API Key）
 ├── app/
 │   ├── main.py             # FastAPI 应用入口
 │   ├── config.py           # 统一配置文件
@@ -171,9 +181,18 @@ uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 │   ├── cache.py            # 内存缓存模块
 │   ├── logger.py           # 日志系统
 │   ├── routes_api.py       # API 路由
-│   └── routes_page.py      # 页面路由
+│   ├── routes_page.py      # 页面路由
+│   └── chat/               # AI 对话模块
+│       ├── agent.py        # 对话代理（工具调度+KV缓存优化）
+│       ├── deepseek.py     # DeepSeek API 客户端（流式/非流式）
+│       ├── tools.py        # 20+ 数据查询工具定义与执行
+│       ├── prompts.py      # 系统提示词
+│       ├── context.py      # 会话上下文管理
+│       ├── router.py       # 对话 API 路由
+│       └── logger.py       # 对话日志
 ├── templates/              # Jinja2 模板
 │   ├── base.html           # 基础布局
+│   ├── chat.html           # AI 对话页面
 │   ├── index.html          # 首页
 │   ├── system.html         # 系统日志页
 │   ├── lottery_detail.html # 开奖记录
